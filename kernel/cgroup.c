@@ -4728,13 +4728,12 @@ core_initcall(cgroup_wq_init);
  *    the_top_cgroup_hack in cgroup_exit(), which sets an exiting tasks
  *    cgroup to top_cgroup.
  */
-
-/* TODO: Use a proper seq_file iterator */
-int proc_cgroup_show(struct seq_file *m, void *v)
+int proc_cgroup_show(struct seq_file *m, struct pid_namespace *ns,
+		     struct pid *pid, struct task_struct *tsk)
 {
 	struct pid *pid;
 	struct task_struct *tsk;
-	char *buf;
+	char *buf, *path;
 	int retval;
 	struct cgroupfs_root *root;
 
@@ -4742,14 +4741,6 @@ int proc_cgroup_show(struct seq_file *m, void *v)
 	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
 	if (!buf)
 		goto out;
-
-	retval = -ESRCH;
-	pid = m->private;
-	tsk = get_pid_task(pid, PIDTYPE_PID);
-	if (!tsk)
-		goto out_free;
-
-	retval = 0;
 
 	mutex_lock(&cgroup_mutex);
 
@@ -4773,10 +4764,9 @@ int proc_cgroup_show(struct seq_file *m, void *v)
 		seq_putc(m, '\n');
 	}
 
+	retval = 0;
 out_unlock:
 	mutex_unlock(&cgroup_mutex);
-	put_task_struct(tsk);
-out_free:
 	kfree(buf);
 out:
 	return retval;

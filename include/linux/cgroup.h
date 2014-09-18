@@ -40,7 +40,8 @@ extern int cgroupstats_build(struct cgroupstats *stats,
 extern int cgroup_load_subsys(struct cgroup_subsys *ss);
 extern void cgroup_unload_subsys(struct cgroup_subsys *ss);
 
-extern int proc_cgroup_show(struct seq_file *, void *);
+extern int proc_cgroup_show(struct seq_file *m, struct pid_namespace *ns,
+			    struct pid *pid, struct task_struct *tsk);
 
 /*
  * Define the enumeration of all cgroup subsystems.
