@@ -410,6 +410,8 @@ Optional properties:
 - qcom,panel-ack-disabled: A boolean property to indicate, whether we need to wait for any ACK from the panel
 			   for any commands that we send.
 - qcom,mdss-dsi-force-clock-lane-hs:	Boolean to force dsi clock lanes to HS mode always.
+- qcom,mdss-dsi-post-init-delay:	Specifies required number of frames to wait so that panel can be functional
+					to show proper display.
 
 - qcom,mdss-dsi-display-timings:	Parent node that lists the different resolutions that the panel supports.
 					Each child represents timings settings for a specific resolution.
@@ -561,6 +563,7 @@ Example:
 						<128 240 64>;
 		qcom,mdss-dsi-panel-orientation = "180"
 		qcom,mdss-dsi-force-clock-lane-hs;
+		qcom,mdss-dsi-post-init-delay = <1>;
 		qcom,mdss-dsi-display-timings {
 			wqhd {
 				qcom,mdss-dsi-timing-default;
