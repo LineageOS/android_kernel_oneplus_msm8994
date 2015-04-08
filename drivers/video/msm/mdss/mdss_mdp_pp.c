@@ -465,8 +465,6 @@ static void pp_ad_bypass_config(struct mdss_ad_info *ad,
 static int mdss_mdp_ad_setup(struct msm_fb_data_type *mfd);
 static void pp_ad_cfg_lut(char __iomem *addr, u32 *data);
 static int pp_ad_attenuate_bl(struct mdss_ad_info *ad, u32 bl, u32 *bl_out);
-		struct msm_fb_data_type *mfd);
-static struct msm_fb_data_type *mdss_get_mfd_from_index(int index);
 static int pp_ad_linearize_bl(struct mdss_ad_info *ad, u32 bl, u32 *bl_out,
 		int inv);
 static int pp_ad_calc_bl(struct msm_fb_data_type *mfd, int bl_in, int *bl_out,
