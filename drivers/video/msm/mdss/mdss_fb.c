@@ -1033,6 +1033,8 @@ static int mdss_fb_probe(struct platform_device *pdev)
 
 	mdss_fb_init_panel_modes(mfd, pdata);
 
+	mdss_fb_init_panel_modes(mfd, pdata);
+
 	mdss_fb_create_sysfs(mfd);
 	mdss_fb_send_panel_event(mfd, MDSS_EVENT_FB_REGISTERED, fbi);
 
