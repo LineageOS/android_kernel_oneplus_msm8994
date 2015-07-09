@@ -1984,7 +1984,7 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
 
 static int skip_freq_domain(struct rq *task_rq, struct rq *rq, int reason)
 {
-	int skip;
+	int skip = 0;
 
 	if (!reason)
 		return 0;

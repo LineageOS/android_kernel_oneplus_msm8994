@@ -3855,9 +3855,9 @@ err_config_gpio:
 
 static int qpnp_leds_probe(struct spmi_device *spmi)
 {
-	struct qpnp_led_data *led, *led_array;
-	struct resource *led_resource;
-	struct device_node *node, *temp;
+	struct qpnp_led_data *led = NULL, *led_array = NULL;
+	struct resource *led_resource = NULL;
+	struct device_node *node = NULL, *temp = NULL;
 	int rc, i, num_leds = 0, parsed_leds = 0;
 	const char *led_label;
 	bool regulator_probe = false;

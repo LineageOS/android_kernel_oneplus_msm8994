@@ -353,7 +353,7 @@ static void power_supply_callback(struct power_supply *psy)
 	//taokai@bsp add for detecting usb status 2016.04.16
 	static struct power_supply *usb_psy;
 	int usb_state;
-	bool is_usb_present;
+	bool is_usb_present = false;
 	//taokai@bsp add end 2016.04.16
 	union power_supply_propval ret = {0,};
 	int battery_percentage;

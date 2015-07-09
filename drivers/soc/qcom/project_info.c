@@ -301,7 +301,7 @@ static char mainboard_manufacture[8] = {'O', 'N', 'E', 'P', 'L', 'U', 'S','\0'};
 int __init init_project_info(void)
 {
 	static bool project_info_init_done;
-	int ddr_size;
+	int ddr_size = 0;
 
 	if (project_info_init_done)
 		return 0;
