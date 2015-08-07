@@ -1161,4 +1161,6 @@ int mdss_mdp_ctl_cmd_autorefresh_enable(struct mdss_mdp_ctl *ctl,
 #ifdef VENDOR_EDIT
 void mdss_debug_enable_clock(int on);
 #endif
+int mdss_mdp_user_pcc_config(struct mdp_pcc_cfg_data *config);
+
 #endif /* MDSS_MDP_H */
