@@ -3341,6 +3341,20 @@ CONFIG_NET_VENDOR_SILICOM=y
 # CONFIG_DGRP is not set
 
 #
+# Qualcomm Atheros CLD WLAN module
+#
+CONFIG_QCA_CLD_WLAN=m
+CONFIG_QCACLD_WLAN_LFR3=y
+# CONFIG_PRIMA_WLAN_OKC is not set
+# CONFIG_PRIMA_WLAN_11AC_HIGH_TP is not set
+# CONFIG_WLAN_FEATURE_11W is not set
+# CONFIG_WLAN_FEATURE_LPSS is not set
+# CONFIG_QCOM_VOWIFI_11R is not set
+CONFIG_FEATURE_NAN=y
+CONFIG_QCOM_TDLS=y
+CONFIG_QCOM_LTE_COEX=y
+
+#
 # Qualcomm MSM specific device drivers
 #
 # CONFIG_MSM_SSBI is not set
