@@ -19,7 +19,7 @@
 #include <linux/gpio.h>
 #include <linux/input.h>
 #include <linux/miscdevice.h>
-#include "stmvl6180.h"
+#include "../stmvl6180.h"
 
 #include <linux/kernel.h>
 #include <linux/regulator/consumer.h>
