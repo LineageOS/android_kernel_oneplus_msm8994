@@ -13,7 +13,7 @@
 #define VL6180_I2C_H_
 
 #include "vl6180x_platform.h"
-#include "stmvl6180.h"
+#include "../stmvl6180.h"
 
 /**
  * @defgroup cci_i2c  CCI to RAW I2C translation layer
