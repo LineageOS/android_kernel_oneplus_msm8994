@@ -60,9 +60,6 @@
 #define P2P_SEARCH_DWELL_TIME_INCREASE   20
 #define P2P_SOCIAL_CHANNELS              3
 
-// Maximum scan duration before timeout
-#define SIR_HW_DEF_SCAN_MAX_DURATION     30000 /* 30 secs */
-
 /* Max number of channels are 165, but to access 165th element of array,
  *array of 166 is required.
  */
@@ -3499,6 +3496,7 @@ typedef struct sSirSmeAddStaSelfReq
     tANI_U32        type;
     tANI_U32        subType;
     tANI_U8         sessionId;
+    tANI_U16        pkt_err_disconn_th;
 }tSirSmeAddStaSelfReq, *tpSirSmeAddStaSelfReq;
 
 typedef struct sSirSmeDelStaSelfReq

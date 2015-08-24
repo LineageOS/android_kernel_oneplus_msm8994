@@ -870,6 +870,7 @@ enum qca_wlan_vendor_attr_get_concurrency_matrix {
 #define WIFI_FEATURE_EPR                0x4000   /* Enhanced power reporting */
 #define WIFI_FEATURE_AP_STA             0x8000   /* Support for AP STA
                                                     Concurrency */
+#define WIFI_FEATURE_LINK_LAYER_STATS   0x10000  /* Link layer stats */
 /* Add more features here */
 
 
@@ -940,8 +941,8 @@ void wlan_hdd_linux_reg_notifier(struct wiphy *wiphy, struct regulatory_request 
 int wlan_hdd_linux_reg_notifier(struct wiphy *wiphy, struct regulatory_request *request);
 #endif
 
-extern v_VOID_t hdd_connSetConnectionState( hdd_station_ctx_t *pHddStaCtx,
-                                        eConnectionState connState );
+extern v_VOID_t hdd_connSetConnectionState(hdd_adapter_t *pAdapter,
+                                            eConnectionState connState);
 VOS_STATUS wlan_hdd_validate_operation_channel(hdd_adapter_t *pAdapter,int channel);
 #ifdef FEATURE_WLAN_TDLS
 int wlan_hdd_cfg80211_send_tdls_discover_req(struct wiphy *wiphy,

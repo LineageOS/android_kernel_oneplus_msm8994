@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -107,7 +107,7 @@
    This value should be larger than the timeout used by WDI to wait for
    a response from WCNSS */
 #define WLAN_WAIT_TIME_SESSIONOPENCLOSE  15000
-#define WLAN_WAIT_TIME_ABORTSCAN  (SIR_HW_DEF_SCAN_MAX_DURATION + 1000)
+#define WLAN_WAIT_TIME_ABORTSCAN  2000
 #define WLAN_WAIT_TIME_EXTSCAN  1000
 #define WLAN_WAIT_TIME_LL_STATS 5000
 
@@ -195,7 +195,7 @@
 #define WLAN_HDD_QOS_MAP_CONFIGURE 4
 #define HDD_SAP_WAKE_LOCK_DURATION 10000 //in msecs
 
-#define HDD_MOD_EXIT_SSR_MAX_RETRIES 30
+#define HDD_MOD_EXIT_SSR_MAX_RETRIES 60
 
 /* Maximum number of interfaces allowed(STA, P2P Device, P2P Interfaces) */
 #ifndef WLAN_OPEN_P2P_INTERFACE
@@ -303,7 +303,8 @@ extern spinlock_t hdd_context_lock;
 
 #define HDD_VHT_RX_HIGHEST_SUPPORTED_DATA_RATE_1_1       390
 #define HDD_VHT_TX_HIGHEST_SUPPORTED_DATA_RATE_1_1       390
-
+#define HDD_VHT_RX_HIGHEST_SUPPORTED_DATA_RATE_2_2       780
+#define HDD_VHT_TX_HIGHEST_SUPPORTED_DATA_RATE_2_2       780
 
 typedef struct hdd_tx_rx_stats_s
 {
@@ -599,6 +600,14 @@ typedef struct hdd_remain_on_chan_ctx
   action_pkt_buffer_t action_pkt_buff;
   v_BOOL_t hdd_remain_on_chan_cancel_in_progress;
 }hdd_remain_on_chan_ctx_t;
+
+/* RoC Request entry */
+typedef struct hdd_roc_req
+{
+    hdd_list_node_t node; /* MUST be first element */
+    hdd_adapter_t *pAdapter;
+    hdd_remain_on_chan_ctx_t *pRemainChanCtx;
+}hdd_roc_req_t;
 
 typedef enum{
     HDD_IDLE,
@@ -1099,6 +1108,12 @@ struct hdd_adapter_s
    v_BOOL_t isLinkLayerStatsSet;
 #endif
    v_U8_t linkStatus;
+
+    /* Time stamp for last completed RoC request */
+    v_TIME_t lastRocTs;
+
+    /* work queue to defer the back to back p2p_listen */
+    struct delayed_work roc_work;
 };
 
 #define WLAN_HDD_GET_STATION_CTX_PTR(pAdapter) (&(pAdapter)->sessionCtx.station)
@@ -1257,6 +1272,8 @@ struct hdd_context_s
 
    /* Completion  variable to indicate Mc Thread Suspended */
    struct completion mc_sus_event_var;
+
+   struct completion reg_init;
 
    v_BOOL_t isWlanSuspended;
 
@@ -1488,6 +1505,15 @@ struct hdd_context_s
 
     /* Time since boot up to WiFi turn ON (in micro seconds) */
     v_U64_t wifi_turn_on_time_since_boot;
+
+    /* number of rf chains supported by target */
+    uint32_t  num_rf_chains;
+
+    /* Is htTxSTBC supported by target */
+    uint8_t   ht_tx_stbc_supported;
+    /* RoC request queue and work */
+    struct work_struct rocReqWork;
+    hdd_list_t hdd_roc_req_q;
 };
 
 /*---------------------------------------------------------------------------
@@ -1582,7 +1608,7 @@ int wlan_hdd_validate_context(hdd_context_t *pHddCtx);
 v_BOOL_t hdd_is_valid_mac_address(const tANI_U8* pMacAddr);
 VOS_STATUS hdd_issta_p2p_clientconnected(hdd_context_t *pHddCtx);
 void hdd_ipv4_notifier_work_queue(struct work_struct *work);
-v_BOOL_t hdd_isConnectionInProgress( hdd_context_t *pHddCtx );
+bool hdd_isConnectionInProgress(hdd_context_t *pHddCtx);
 #ifdef WLAN_FEATURE_PACKET_FILTERING
 int wlan_hdd_setIPv6Filter(hdd_context_t *pHddCtx, tANI_U8 filterType, tANI_U8 sessionId);
 #endif
@@ -1703,4 +1729,17 @@ void wlan_hdd_disable_roaming(hdd_adapter_t *pAdapter);
 void wlan_hdd_enable_roaming(hdd_adapter_t *pAdapter);
 #endif
 int hdd_set_miracast_mode(hdd_adapter_t *pAdapter, tANI_U8 *command);
+#ifdef WLAN_FEATURE_LINK_LAYER_STATS
+static inline bool hdd_link_layer_stats_supported(void)
+{
+	return true;
+}
+#else
+static inline bool hdd_link_layer_stats_supported(void)
+{
+	return false;
+}
+#endif /* WLAN_FEATURE_LINK_LAYER_STATS */
+
+
 #endif    // end #if !defined( WLAN_HDD_MAIN_H )
