@@ -675,6 +675,7 @@ typedef struct tagCsrConfig
     tANI_BOOLEAN  isRoamOffloadEnabled;
 #endif
     tANI_BOOLEAN obssEnabled;
+    v_U16_t pkt_err_disconn_th;
 }tCsrConfig;
 
 typedef struct tagCsrChannelPowerInfo
@@ -796,11 +797,8 @@ typedef struct tagCsrScanStruct
     tANI_S8     inScanResultBestAPRssi;
     eCsrBand  scanBandPreference;  //This defines the band perference for scan
     csrScanCompleteCallback callback11dScanDone;
+    bool fcc_constraint;
 }tCsrScanStruct;
-
-
-
-
 
 //Save the connected information. This structure + connectedProfile
 //should contain all information about the connection

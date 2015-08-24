@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -1226,6 +1226,11 @@ typedef enum
 #define CFG_ROAM_RESCAN_RSSI_DIFF_MAX                   (100)
 #define CFG_ROAM_RESCAN_RSSI_DIFF_DEFAULT               (5)
 
+#define CFG_DROPPED_PKT_DISCONNECT_TH_NAME      "gDroppedPktDisconnectTh"
+#define CFG_DROPPED_PKT_DISCONNECT_TH_MIN       (48)
+#define CFG_DROPPED_PKT_DISCONNECT_TH_MAX       (256)
+#define CFG_DROPPED_PKT_DISCONNECT_TH_DEFAULT   (96)
+
 /*
  * This parameter is the RSSI diff above neighbor lookup threshold, when
  * opportunistic scan should be triggered.
@@ -1343,6 +1348,13 @@ typedef enum
 #define CFG_ENABLE_HOST_SSDP_MIN               ( 0 )
 #define CFG_ENABLE_HOST_SSDP_MAX               ( 1 )
 #define CFG_ENABLE_HOST_SSDP_DEFAULT           ( 1 )
+
+#ifdef FEATURE_SECURE_FIRMWARE
+#define CFG_ENABLE_FW_HASH_CHECK_NAME          "gEnableFWHashCheck"
+#define CFG_ENABLE_FW_HASH_CHECK_MIN           ( 0 )
+#define CFG_ENABLE_FW_HASH_CHECK_MAX           ( 1 )
+#define CFG_ENABLE_FW_HASH_CHECK_DEFAULT       ( 1 )
+#endif
 
 #define CFG_ENABLE_HOST_NSOFFLOAD_NAME         "hostNSOffload"
 #define CFG_ENABLE_HOST_NSOFFLOAD_MIN          ( 0 )
@@ -1543,10 +1555,10 @@ typedef enum
 #define CFG_PPS_ENABLE_5G_EBT_FEATURE_MAX     ( 1 )
 #define CFG_PPS_ENABLE_5G_EBT_FEATURE_DEFAULT ( 0 )
 
-#define CFG_ENABLE_HYSTERETIC_MODE            "gEnableHystereticMode"
-#define CFG_ENABLE_HYSTERETIC_MODE_MIN        ( 0 )
-#define CFG_ENABLE_HYSTERETIC_MODE_MAX        ( 1 )
-#define CFG_ENABLE_HYSTERETIC_MODE_DEFAULT    ( 0 )
+#define CFG_ENABLE_MEMORY_DEEP_SLEEP          "gEnableMemDeepSleep"
+#define CFG_ENABLE_MEMORY_DEEP_SLEEP_MIN      ( 0 )
+#define CFG_ENABLE_MEMORY_DEEP_SLEEP_MAX      ( 1 )
+#define CFG_ENABLE_MEMORY_DEEP_SLEEP_DEFAULT  ( 1 )
 
 /* In cfg.dat 1=1MBPS, 2=2MBPS, 3=5_5MBPS, 4=11MBPS, 5=6MBPS, 6=9MBPS,
  * 7=12MBPS, 8=18MBPS, 9=24MBPS. But 6=9MBPS and 8=18MBPS are not basic
@@ -1564,18 +1576,28 @@ typedef enum
 #define CFG_ENABLE_PACKET_LOG_MAX        ( 1 )
 #define CFG_ENABLE_PACKET_LOG_DEFAULT    ( 0 )
 
+/* gFwDebugLogType takes values from enum dbglog_process_t,
+ * make default value as DBGLOG_PROCESS_NET_RAW to give the
+ * logs to net link since cnss_diag service is started at boot
+ * time by default.
+ */
 #define CFG_ENABLE_FW_LOG_TYPE            "gFwDebugLogType"
 #define CFG_ENABLE_FW_LOG_TYPE_MIN        ( 0 )
 #define CFG_ENABLE_FW_LOG_TYPE_MAX        ( 255 )
-#define CFG_ENABLE_FW_LOG_TYPE_DEFAULT    ( 0 )
+#define CFG_ENABLE_FW_LOG_TYPE_DEFAULT    ( 3 )
 
-
+/* gFwDebugLogLevel takes values from enum DBGLOG_LOG_LVL,
+ * make default value as DBGLOG_WARN to enable error and
+ * warning logs by default.
+ */
 #define CFG_ENABLE_FW_DEBUG_LOG_LEVEL          "gFwDebugLogLevel"
 #define CFG_ENABLE_FW_DEBUG_LOG_LEVEL_MIN      ( 0 )
 #define CFG_ENABLE_FW_DEBUG_LOG_LEVEL_MAX      ( 255 )
-#define CFG_ENABLE_FW_DEBUG_LOG_LEVEL_DEFAULT  ( 0 )
+#define CFG_ENABLE_FW_DEBUG_LOG_LEVEL_DEFAULT  ( 4 )
 
-
+/* For valid values of log levels check enum DBGLOG_LOG_LVL and
+ * for valid values of module ids check enum WLAN_MODULE_ID.
+ */
 #define CFG_ENABLE_FW_MODULE_LOG_LEVEL    "gFwDebugModuleLoglevel"
 #define CFG_ENABLE_FW_MODULE_LOG_DEFAULT  ""
 
@@ -2591,28 +2613,28 @@ This feature requires the dependent cfg.ini "gRoamPrefer5GHz" set to 1 */
 
 #ifdef MSM_PLATFORM
 #define CFG_BUS_BANDWIDTH_HIGH_THRESHOLD           "gBusBandwidthHighThreshold"
-#define CFG_BUS_BANDWIDTH_HIGH_THRESHOLD_DEFAULT   ( 40000 )
-#define CFG_BUS_BANDWIDTH_HIGH_THRESHOLD_MIN       ( 10000 )
+#define CFG_BUS_BANDWIDTH_HIGH_THRESHOLD_DEFAULT   ( 2000 )
+#define CFG_BUS_BANDWIDTH_HIGH_THRESHOLD_MIN       ( 0 )
 #define CFG_BUS_BANDWIDTH_HIGH_THRESHOLD_MAX       ( 4294967295UL )
 
 #define CFG_BUS_BANDWIDTH_MEDIUM_THRESHOLD         "gBusBandwidthMediumThreshold"
-#define CFG_BUS_BANDWIDTH_MEDIUM_THRESHOLD_DEFAULT ( 10000 )
-#define CFG_BUS_BANDWIDTH_MEDIUM_THRESHOLD_MIN     ( 3000 )
-#define CFG_BUS_BANDWIDTH_MEDIUM_THRESHOLD_MAX     ( 40000 )
+#define CFG_BUS_BANDWIDTH_MEDIUM_THRESHOLD_DEFAULT ( 500 )
+#define CFG_BUS_BANDWIDTH_MEDIUM_THRESHOLD_MIN     ( 0 )
+#define CFG_BUS_BANDWIDTH_MEDIUM_THRESHOLD_MAX     ( 4294967295UL )
 
 #define CFG_BUS_BANDWIDTH_LOW_THRESHOLD            "gBusBandwidthLowThreshold"
-#define CFG_BUS_BANDWIDTH_LOW_THRESHOLD_DEFAULT    ( 3000 )
+#define CFG_BUS_BANDWIDTH_LOW_THRESHOLD_DEFAULT    ( 150 )
 #define CFG_BUS_BANDWIDTH_LOW_THRESHOLD_MIN        ( 0 )
-#define CFG_BUS_BANDWIDTH_LOW_THRESHOLD_MAX        ( 10000 )
+#define CFG_BUS_BANDWIDTH_LOW_THRESHOLD_MAX        ( 4294967295UL )
 
 #define CFG_BUS_BANDWIDTH_COMPUTE_INTERVAL         "gBusBandwidthComputeInterval"
-#define CFG_BUS_BANDWIDTH_COMPUTE_INTERVAL_DEFAULT ( 3000 )
-#define CFG_BUS_BANDWIDTH_COMPUTE_INTERVAL_MIN     ( 1000 )
+#define CFG_BUS_BANDWIDTH_COMPUTE_INTERVAL_DEFAULT ( 100 )
+#define CFG_BUS_BANDWIDTH_COMPUTE_INTERVAL_MIN     ( 0 )
 #define CFG_BUS_BANDWIDTH_COMPUTE_INTERVAL_MAX     ( 10000 )
 
 #define CFG_TCP_DELACK_THRESHOLD_HIGH              "gTcpDelAckThresholdHigh"
-#define CFG_TCP_DELACK_THRESHOLD_HIGH_DEFAULT      ( 10000 )
-#define CFG_TCP_DELACK_THRESHOLD_HIGH_MIN          ( 1000 )
+#define CFG_TCP_DELACK_THRESHOLD_HIGH_DEFAULT      ( 500 )
+#define CFG_TCP_DELACK_THRESHOLD_HIGH_MIN          ( 0 )
 #define CFG_TCP_DELACK_THRESHOLD_HIGH_MAX          ( 16000 )
 
 #define CFG_TCP_DELACK_THRESHOLD_LOW               "gTcpDelAckThresholdLow"
@@ -2818,6 +2840,11 @@ This feature requires the dependent cfg.ini "gRoamPrefer5GHz" set to 1 */
 #define CFG_INFORM_BSS_RSSI_RAW_MIN                (0)
 #define CFG_INFORM_BSS_RSSI_RAW_MAX                (1)
 #define CFG_INFORM_BSS_RSSI_RAW_DEFAULT            (1)
+
+#define CFG_P2P_LISTEN_DEFER_INTERVAL_NAME        "gP2PListenDeferInterval"
+#define CFG_P2P_LISTEN_DEFER_INTERVAL_MIN         (100)
+#define CFG_P2P_LISTEN_DEFER_INTERVAL_MAX         (200)
+#define CFG_P2P_LISTEN_DEFER_INTERVAL_DEFAULT     (100)
 
 /*---------------------------------------------------------------------------
   Type declarations
@@ -3329,7 +3356,7 @@ typedef struct
    v_U8_t                      apMaxOffloadPeers;
    v_U8_t                      apMaxOffloadReorderBuffs;
    v_BOOL_t                    advertiseConcurrentOperation;
-   v_BOOL_t                    enableHystereticMode;
+   v_BOOL_t                    enableMemDeepSleep;
 
    v_U32_t                     defaultRateIndex24Ghz;
    char                        overrideCountryCode[4];
@@ -3421,6 +3448,11 @@ typedef struct
    bool                        enable_mac_spoofing;
    uint8_t                     sap_dot11mc;
    uint8_t                     inform_bss_rssi_raw;
+#ifdef FEATURE_SECURE_FIRMWARE
+   bool                        enable_fw_hash_check;
+#endif
+   uint16_t                    p2p_listen_defer_interval;
+   uint16_t                    pkt_err_disconn_th;
 } hdd_config_t;
 
 #ifdef WLAN_FEATURE_MBSSID
@@ -3572,4 +3604,5 @@ v_VOID_t hdd_mbssid_apply_def_cfg_ini(hdd_adapter_t *pAdapter);
 #endif
 
 void print_hdd_cfg(hdd_context_t *pHddCtx);
+VOS_STATUS hdd_update_nss(hdd_context_t *hdd_ctx, uint8_t nss);
 #endif

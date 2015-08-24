@@ -962,8 +962,7 @@ VOS_STATUS hdd_hostapd_SAPEventCB( tpSap_Event pSapEvent, v_PVOID_t usrDataForCa
             WLANSAP_Get_Dfs_Ignore_CAC(pHddCtx->hHal, &ignoreCAC);
             if ((NV_CHANNEL_DFS !=
                 vos_nv_getChannelEnabledState(pHddApCtx->operatingChannel))
-                || ignoreCAC
-                || pHddCtx->dev_dfs_cac_status == DFS_CAC_ALREADY_DONE)
+                || ignoreCAC)
             {
                 pHddApCtx->dfs_cac_block_tx = VOS_FALSE;
             } else {
@@ -2719,10 +2718,7 @@ static iw_softap_setparam(struct net_device *dev,
             {
                 /* If input value is non-zero get stats */
                 if (set_value) {
-                    ret = process_wma_set_command(
-                         (int)pHostapdAdapter->sessionId,
-                         (int)WMA_VDEV_TXRX_GET_IPA_UC_FW_STATS_CMDID,
-                          0, VDEV_CMD);
+                    hdd_ipa_uc_stat_request(pHostapdAdapter, set_value);
                 }
                 else {
                     /* place holder for stats clean up
@@ -4966,6 +4962,11 @@ VOS_STATUS hdd_init_ap_mode( hdd_adapter_t *pAdapter )
     int ret;
 
     ENTER();
+
+    if (pHddCtx->isLogpInProgress) {
+        hddLog(LOG1, FL("LOGP in Progress. Ignore!!!"));
+        return VOS_STATUS_E_FAILURE;
+    }
 
 #ifdef WLAN_FEATURE_MBSSID
     sapContext = WLANSAP_Open(pVosContext);

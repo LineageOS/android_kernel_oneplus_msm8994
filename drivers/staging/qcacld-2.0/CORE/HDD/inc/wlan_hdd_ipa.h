@@ -58,6 +58,12 @@ int hdd_ipa_set_perf_level(hdd_context_t *hdd_ctx, uint64_t tx_packets,
 int hdd_ipa_suspend(hdd_context_t *hdd_ctx);
 int hdd_ipa_resume(hdd_context_t *hdd_ctx);
 
+#ifdef IPA_UC_OFFLOAD
+void hdd_ipa_uc_stat_query(hdd_context_t *pHddCtx,
+	uint32_t *ipa_tx_diff, uint32_t *ipa_rx_diff);
+void hdd_ipa_uc_stat_request( hdd_adapter_t *adapter, uint8_t reason);
+#endif
+
 #endif
 
 #endif

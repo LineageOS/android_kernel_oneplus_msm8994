@@ -136,14 +136,33 @@ static eHalStatus hdd_RoamSetKeyCompleteHandler( hdd_adapter_t *pAdapter,
                                                 eRoamCmdStatus roamStatus,
                                                 eCsrRoamResult roamResult );
 
-v_VOID_t hdd_connSetConnectionState( hdd_station_ctx_t *pHddStaCtx,
-                                        eConnectionState connState )
+v_VOID_t hdd_connSetAuthenticated( hdd_adapter_t *pAdapter, v_U8_t authState )
 {
-   // save the new connection state
+   hdd_station_ctx_t *pHddStaCtx = WLAN_HDD_GET_STATION_CTX_PTR(pAdapter);
+   hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+
+   /* save the new connection state */
+   hddLog(LOG1, FL("Authenticated state Changed from oldState:%d to State:%d"),
+                    pHddStaCtx->conn_info.uIsAuthenticated, authState);
+   pHddStaCtx->conn_info.uIsAuthenticated = authState;
+
+   /* Check is pending ROC request or not when auth state changed */
+   schedule_work(&pHddCtx->rocReqWork);
+}
+
+v_VOID_t hdd_connSetConnectionState( hdd_adapter_t *pAdapter,
+                                                eConnectionState connState )
+{
+   hdd_station_ctx_t *pHddStaCtx = WLAN_HDD_GET_STATION_CTX_PTR(pAdapter);
+   hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+
+   /* save the new connection state */
    hddLog(LOG1, FL("ConnectionState Changed from oldState:%d to State:%d"),
                     pHddStaCtx->conn_info.connState,connState);
    pHddStaCtx->conn_info.connState = connState;
 
+   /* Check is pending ROC request or not when connection state changed */
+   schedule_work(&pHddCtx->rocReqWork);
 }
 
 // returns FALSE if not connected.
@@ -493,6 +512,7 @@ void hdd_SendFTEvent(hdd_adapter_t *pAdapter)
     if (auth_resp_len == 0)
     {
         hddLog(LOGE, "%s: AuthRsp FTIES is of length 0", __func__);
+        kfree(buff);
         return;
     }
 
@@ -917,7 +937,8 @@ static eHalStatus hdd_DisConnectHandler( hdd_adapter_t *pAdapter, tCsrRoamInfo *
         VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
                    "%s: Set HDD connState to eConnectionState_Disconnecting",
                    __func__);
-        hdd_connSetConnectionState( pHddStaCtx, eConnectionState_Disconnecting );
+        hdd_connSetConnectionState(pAdapter,
+                   eConnectionState_Disconnecting);
     }
 
     /* If only STA mode is on */
@@ -1042,7 +1063,8 @@ static eHalStatus hdd_DisConnectHandler( hdd_adapter_t *pAdapter, tCsrRoamInfo *
     VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
                    "%s: Set HDD connState to eConnectionState_NotConnected",
                    __func__);
-    hdd_connSetConnectionState( pHddStaCtx, eConnectionState_NotConnected );
+    hdd_connSetConnectionState(pAdapter,
+                            eConnectionState_NotConnected);
 #ifdef WLAN_FEATURE_GTK_OFFLOAD
     if ((WLAN_HDD_INFRA_STATION == pAdapter->device_mode) ||
         (WLAN_HDD_P2P_CLIENT == pAdapter->device_mode))
@@ -1200,27 +1222,19 @@ static VOS_STATUS hdd_roamRegisterSTA( hdd_adapter_t *pAdapter,
     * All the traffic routed to WLAN host driver, do not need to
     * route IPA. It should be routed kernel network stack */
 #if defined(IPA_OFFLOAD) && !defined(IPA_UC_OFFLOAD)
-   if (hdd_ipa_is_enabled(pHddCtx)) {
+   if (hdd_ipa_is_enabled(pHddCtx))
       vosStatus = WLANTL_RegisterSTAClient( pHddCtx->pvosContext,
                                          hdd_ipa_process_rxt,
                                          hdd_tx_complete_cbk,
                                          hdd_tx_fetch_packet_cbk, &staDesc,
                                          pBssDesc->rssi );
-   } else {
-      vosStatus = WLANTL_RegisterSTAClient( pHddCtx->pvosContext,
-                                         hdd_rx_mul_packet_cbk,
-                                         hdd_tx_complete_cbk,
-                                         hdd_tx_fetch_packet_cbk, &staDesc,
-                                         pBssDesc->rssi );
-   }
-#else
+   else
+#endif
    vosStatus = WLANTL_RegisterSTAClient( pHddCtx->pvosContext,
                                          hdd_rx_packet_cbk,
                                          hdd_tx_complete_cbk,
                                          hdd_tx_fetch_packet_cbk, &staDesc,
                                          pBssDesc->rssi );
-#endif
-
    if ( !VOS_IS_STATUS_SUCCESS( vosStatus ) )
    {
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
@@ -1260,7 +1274,7 @@ static VOS_STATUS hdd_roamRegisterSTA( hdd_adapter_t *pAdapter,
 #endif
                                        );
 
-      pHddStaCtx->conn_info.uIsAuthenticated = VOS_TRUE;
+      hdd_connSetAuthenticated(pAdapter, VOS_TRUE);
    }
    else
    {
@@ -1275,7 +1289,7 @@ static VOS_STATUS hdd_roamRegisterSTA( hdd_adapter_t *pAdapter,
                                         VOS_FALSE
 #endif
                                        );
-      pHddStaCtx->conn_info.uIsAuthenticated = VOS_FALSE;
+      hdd_connSetAuthenticated(pAdapter, VOS_FALSE);
    }
    return( vosStatus );
 }
@@ -1415,7 +1429,8 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
             VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
                     "%s: Set HDD connState to eConnectionState_Associated",
                     __func__);
-            hdd_connSetConnectionState( pHddStaCtx, eConnectionState_Associated );
+            hdd_connSetConnectionState(pAdapter,
+                                       eConnectionState_Associated);
         }
 
         // Save the connection info from CSR...
@@ -1473,7 +1488,12 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
             ft_carrier_on = TRUE;
         }
 #endif
-        pHddCtx->sta_to_adapter[pRoamInfo->staId] = pAdapter;
+        /* Check for STAID */
+        if ((WLAN_MAX_STA_COUNT + 3) > pRoamInfo->staId)
+           pHddCtx->sta_to_adapter[pRoamInfo->staId] = pAdapter;
+        else
+           hddLog(VOS_TRACE_LEVEL_ERROR, "%s: Wrong Staid: %d", __func__,
+                                                       pRoamInfo->staId);
 
 #ifdef IPA_OFFLOAD
         if (hdd_ipa_is_enabled(pHddCtx))
@@ -1715,7 +1735,7 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
                                                   VOS_FALSE
 #endif
                                                  );
-                pHddStaCtx->conn_info.uIsAuthenticated = VOS_FALSE;
+                hdd_connSetAuthenticated(pAdapter, VOS_FALSE);
             }
             else
             {
@@ -1731,7 +1751,7 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
                                                   VOS_FALSE
 #endif
                                                  );
-                pHddStaCtx->conn_info.uIsAuthenticated = VOS_TRUE;
+                hdd_connSetAuthenticated(pAdapter, VOS_TRUE);
             }
 
             if ( VOS_IS_STATUS_SUCCESS( vosStatus ) )
@@ -1784,7 +1804,8 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
             VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
                     "%s: Set HDD connState to eConnectionState_NotConnected",
                     __func__);
-            hdd_connSetConnectionState( pHddStaCtx, eConnectionState_NotConnected);
+            hdd_connSetConnectionState(pAdapter,
+                                             eConnectionState_NotConnected);
         }
         if((pHddCtx->concurrency_mode <= 1) &&
            (pHddCtx->no_of_open_sessions[WLAN_HDD_INFRA_STATION] <=1))
@@ -1962,8 +1983,8 @@ static void hdd_RoamIbssIndicationHandler( hdd_adapter_t *pAdapter,
          VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
                    "%s: Set HDD connState to eConnectionState_IbssDisconnected",
                    __func__);
-         hdd_connSetConnectionState( WLAN_HDD_GET_STATION_CTX_PTR(pAdapter),
-                                     eConnectionState_IbssDisconnected );
+         hdd_connSetConnectionState(pAdapter,
+                                     eConnectionState_IbssDisconnected);
          /* Notify wmm */
          hdd_wmm_connect(pAdapter, pRoamInfo, eCSR_BSS_TYPE_IBSS);
          pHddCtx->sta_to_adapter[IBSS_BROADCAST_STAID] = pAdapter;
@@ -2133,7 +2154,8 @@ static eHalStatus roamIbssConnectHandler( hdd_adapter_t *pAdapter, tCsrRoamInfo 
                    "Set HDD connState to eConnectionState_IbssConnected",
                    __func__);
    // Set the internal connection state to show 'IBSS Connected' (IBSS with a partner stations)...
-   hdd_connSetConnectionState( WLAN_HDD_GET_STATION_CTX_PTR(pAdapter), eConnectionState_IbssConnected );
+   hdd_connSetConnectionState(pAdapter,
+                              eConnectionState_IbssConnected);
 
    // Save the connection info from CSR...
    hdd_connSaveConnectInfo( pAdapter, pRoamInfo, eCSR_BSS_TYPE_IBSS );
@@ -2235,7 +2257,7 @@ static eHalStatus hdd_RoamSetKeyCompleteHandler( hdd_adapter_t *pAdapter, tCsrRo
                                            VOS_FALSE
 #endif
                                           );
-         pHddStaCtx->conn_info.uIsAuthenticated = VOS_TRUE;
+         hdd_connSetAuthenticated(pAdapter, VOS_TRUE);
          if ( ( eCSR_ROAM_RESULT_AUTHENTICATED == roamResult ) &&
              (pRoamInfo != NULL) && !pRoamInfo->fAuthRequired )
          {
@@ -2255,7 +2277,7 @@ static eHalStatus hdd_RoamSetKeyCompleteHandler( hdd_adapter_t *pAdapter, tCsrRo
 #endif
                                                  );
 
-            pHddStaCtx->conn_info.uIsAuthenticated = VOS_TRUE;
+            hdd_connSetAuthenticated(pAdapter, VOS_TRUE);
 
             if (pHddCtx->cfg_ini->enablePowersaveOffload &&
                 ((WLAN_HDD_INFRA_STATION == pAdapter->device_mode) ||
@@ -2458,7 +2480,8 @@ static eHalStatus roamRoamConnectStatusUpdateHandler( hdd_adapter_t *pAdapter, t
          VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
                    "%s: Set HDD connState to eConnectionState_NotConnected",
                    __func__);
-         hdd_connSetConnectionState( WLAN_HDD_GET_STATION_CTX_PTR(pAdapter), eConnectionState_NotConnected );
+         hdd_connSetConnectionState(pAdapter,
+                                     eConnectionState_NotConnected);
 
          // Send the bssid address to the wext.
          hdd_SendAssociationEvent(pAdapter->dev, pRoamInfo);
@@ -2554,23 +2577,17 @@ VOS_STATUS hdd_roamRegisterTDLSSTA( hdd_adapter_t *pAdapter,
     * All the traffic routed to WLAN host driver, do not need to
     * route IPA. It should be routed kernel network stack */
 #if defined(IPA_OFFLOAD) && !defined(IPA_UC_OFFLOAD)
-    if (hdd_ipa_is_enabled(pHddCtx)) {
+    if (hdd_ipa_is_enabled(pHddCtx))
        vosStatus = WLANTL_RegisterSTAClient( pVosContext,
                                           hdd_ipa_process_rxt,
                                           hdd_tx_complete_cbk,
                                           hdd_tx_fetch_packet_cbk, &staDesc, 0 );
-    } else {
-       vosStatus = WLANTL_RegisterSTAClient( pHddCtx->pvosContext,
-                                          hdd_rx_mul_packet_cbk,
-                                          hdd_tx_complete_cbk,
-                                          hdd_tx_fetch_packet_cbk, &staDesc, 0 );
-   }
-#else
+    else
+#endif
     vosStatus = WLANTL_RegisterSTAClient( pVosContext,
                                           hdd_rx_packet_cbk,
                                           hdd_tx_complete_cbk,
                                           hdd_tx_fetch_packet_cbk, &staDesc, 0 );
-#endif
 
     if ( !VOS_IS_STATUS_SUCCESS( vosStatus ) )
     {
@@ -2736,7 +2753,7 @@ eHalStatus hdd_RoamTdlsStatusUpdateHandler(hdd_adapter_t *pAdapter,
         }
         case eCSR_ROAM_RESULT_DELETE_TDLS_PEER:
         {
-            for ( staIdx = 0; staIdx < HDD_MAX_NUM_TDLS_STA; staIdx++ )
+            for (staIdx = 0; staIdx < pHddCtx->max_num_tdls_sta; staIdx++)
             {
                 if ((pHddCtx->tdlsConnInfo[staIdx].sessionId == pRoamInfo->sessionId) &&
                     pRoamInfo->staId == pHddCtx->tdlsConnInfo[staIdx].staId)
@@ -2751,7 +2768,6 @@ eHalStatus hdd_RoamTdlsStatusUpdateHandler(hdd_adapter_t *pAdapter,
                         wlan_hdd_tdls_decrement_peer_count(pAdapter);
                     }
                     wlan_hdd_tdls_reset_peer(pAdapter, pRoamInfo->peerMac);
-                    (WLAN_HDD_GET_CTX(pAdapter))->sta_to_adapter[pRoamInfo->staId] = NULL;
 
                     pHddCtx->tdlsConnInfo[staIdx].staId = 0 ;
                     pHddCtx->tdlsConnInfo[staIdx].sessionId = 255;
@@ -2781,7 +2797,7 @@ eHalStatus hdd_RoamTdlsStatusUpdateHandler(hdd_adapter_t *pAdapter,
         case eCSR_ROAM_RESULT_DELETE_ALL_TDLS_PEER_IND:
         {
             /* 0 staIdx is assigned to AP we dont want to touch that */
-            for ( staIdx = 0; staIdx < HDD_MAX_NUM_TDLS_STA; staIdx++ )
+            for (staIdx = 0; staIdx < pHddCtx->max_num_tdls_sta; staIdx++)
             {
                 if ((pHddCtx->tdlsConnInfo[staIdx].sessionId == pRoamInfo->sessionId) &&
                     pHddCtx->tdlsConnInfo[staIdx].staId)
@@ -2817,7 +2833,6 @@ eHalStatus hdd_RoamTdlsStatusUpdateHandler(hdd_adapter_t *pAdapter,
                     }
                     wlan_hdd_tdls_decrement_peer_count(pAdapter);
 
-                    (WLAN_HDD_GET_CTX(pAdapter))->sta_to_adapter[staIdx] = NULL;
                     vos_mem_zero(&pHddCtx->tdlsConnInfo[staIdx].peerMac,
                                                sizeof(v_MACADDR_t)) ;
                     pHddCtx->tdlsConnInfo[staIdx].staId = 0 ;
