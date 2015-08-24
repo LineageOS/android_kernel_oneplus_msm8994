@@ -1008,7 +1008,7 @@ VosMCThread
     } // while message loop processing
   } // while TRUE
   // If we get here the MC thread must exit
-  VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_INFO,
+  VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
       "%s: MC Thread exiting!!!!", __func__);
   complete_and_exit(&pSchedContext->McShutdown, 0);
 } /* VosMCThread() */
@@ -1842,7 +1842,7 @@ VOS_STATUS vos_sched_close ( v_PVOID_t pVosContext )
     set_bit(RX_SHUTDOWN_EVENT_MASK, &gpVosSchedContext->tlshimRxEvtFlg);
     set_bit(RX_POST_EVENT_MASK, &gpVosSchedContext->tlshimRxEvtFlg);
     wake_up_interruptible(&gpVosSchedContext->tlshimRxWaitQueue);
-    wait_for_completion_interruptible(&gpVosSchedContext->TlshimRxShutdown);
+    wait_for_completion(&gpVosSchedContext->TlshimRxShutdown);
     gpVosSchedContext->TlshimRxThread = NULL;
     vos_drop_rxpkt_by_staid(gpVosSchedContext, WLAN_MAX_STA_COUNT);
     vos_free_tlshim_pkt_freeq(gpVosSchedContext);
@@ -2427,8 +2427,6 @@ void vos_ssr_protect(const char *caller_func)
      unsigned long irq_flags;
 
      count = atomic_inc_return(&ssr_protect_entry_count);
-     VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
-               "%s: ENTRY ACTIVE %d", caller_func, count);
 
      spin_lock_irqsave(&ssr_protect_lock, irq_flags);
 
@@ -2468,8 +2466,6 @@ void vos_ssr_unprotect(const char *caller_func)
    unsigned long irq_flags;
 
    count = atomic_dec_return(&ssr_protect_entry_count);
-   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
-             "%s: ENTRY INACTIVE %d", caller_func, count);
 
    spin_lock_irqsave(&ssr_protect_lock, irq_flags);
 

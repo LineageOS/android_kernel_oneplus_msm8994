@@ -1242,6 +1242,7 @@ typedef struct tagCsrConfigParam
 
     tANI_BOOLEAN obssEnabled;
 
+    v_U16_t    pkt_err_disconn_th;
 }tCsrConfigParam;
 
 //Tush

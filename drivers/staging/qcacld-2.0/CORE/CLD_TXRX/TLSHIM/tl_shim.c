@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -767,6 +767,11 @@ static int tlshim_mgmt_rx_wmi_handler(void *context, u_int8_t *data,
 							   vos_ctx);
 	VOS_STATUS ret = VOS_STATUS_SUCCESS;
 
+	if (vos_is_logp_in_progress(VOS_MODULE_ID_TL, NULL)) {
+			TLSHIM_LOGE("%s: LOPG in progress\n", __func__);
+			return (-1);
+	}
+
 	adf_os_spin_lock_bh(&tl_shim->mgmt_lock);
 	ret = tlshim_mgmt_rx_process(context, data, data_len, FALSE, 0);
 	adf_os_spin_unlock_bh(&tl_shim->mgmt_lock);
@@ -867,16 +872,10 @@ static void tlshim_data_rx_cb(struct txrx_tl_shim_ctx *tl_shim,
 	} else
 		adf_os_spin_unlock_bh(&tl_shim->bufq_lock);
 
-	buf = buf_list;
-	while (buf) {
-		next_buf = adf_nbuf_queue_next(buf);
-		adf_nbuf_set_next(buf, NULL); /* Add NULL terminator */
-		ret = data_rx(vos_ctx, buf, staid);
-		if (ret != VOS_STATUS_SUCCESS) {
-			TLSHIM_LOGE("Frame Rx to HDD failed");
-			adf_nbuf_free(buf);
-		}
-		buf = next_buf;
+	ret = data_rx(vos_ctx, buf_list, staid);
+	if (ret != VOS_STATUS_SUCCESS) {
+		TLSHIM_LOGE("Frame Rx to HDD failed");
+		goto free_buf;
 	}
 	return;
 
@@ -1144,7 +1143,7 @@ adf_nbuf_t WLANTL_SendSTA_DataFrame(void *vos_ctx, u_int8_t sta_id,
 	}
 
 	if (vos_is_load_unload_in_progress(VOS_MODULE_ID_TL, NULL)) {
-		TLSHIM_LOGP("%s: Driver load/unload in progress", __func__);
+		TLSHIM_LOGW("%s: Driver load/unload in progress", __func__);
 		return skb;
 	}
 	/*
@@ -1614,7 +1613,9 @@ VOS_STATUS WLANTL_ChangeSTAState(void *vos_ctx, u_int8_t sta_id,
 	peer = ol_txrx_peer_find_by_local_id(
 			((pVosContextType) vos_ctx)->pdev_txrx_ctx,
 			sta_id);
-	if (!peer)
+
+	if ((peer == NULL) ||
+                (adf_os_atomic_read(&peer->delete_in_progress) == 1))
 		return VOS_STATUS_E_FAULT;
 
 	if (sta_state == WLANTL_STA_CONNECTED)
@@ -2032,6 +2033,20 @@ void *tl_shim_get_vdev_by_sta_id(void *vos_context, uint8_t sta_id)
 	}
 
 	return peer->vdev;
+}
+
+void
+WLANTL_PauseUnPauseQs(void *vos_context, v_BOOL_t flag)
+{
+	ol_txrx_pdev_handle pdev = vos_get_context(VOS_MODULE_ID_TXRX,
+					vos_context);
+
+	if (true == flag)
+		wdi_in_pdev_pause(pdev,
+				   OL_TXQ_PAUSE_REASON_VDEV_SUSPEND);
+	else
+		wdi_in_pdev_unpause(pdev,
+				   OL_TXQ_PAUSE_REASON_VDEV_SUSPEND);
 }
 
 #ifdef QCA_LL_TX_FLOW_CT

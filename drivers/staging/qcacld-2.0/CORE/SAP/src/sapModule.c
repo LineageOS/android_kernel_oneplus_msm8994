@@ -3335,6 +3335,8 @@ WLANSAP_UpdateSapConfigAddIE(tsap_Config_t *pConfig,
     default:
             VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO,
                 FL("No matching buffer type %d"), updateType);
+            if (pBuffer != NULL)
+                vos_mem_free(pBuffer);
         break;
     }
 

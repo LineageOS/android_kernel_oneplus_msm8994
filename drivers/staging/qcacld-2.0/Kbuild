@@ -1117,8 +1117,10 @@ endif
 ifeq ($(CONFIG_HIF_USB), 1)
 CDEFINES += -DHIF_USB
 CDEFINES += -DCONFIG_HL_SUPPORT
-CDEFINES += -DCONFIG_FW_LOGS_BASED_ON_INI
 endif
+
+#Enable FW logs through ini
+CDEFINES += -DCONFIG_FW_LOGS_BASED_ON_INI
 
 #Enable pci read/write config functions
 ifeq ($(CONFIG_ATH_PCI), 1)
@@ -1202,6 +1204,9 @@ ifeq ($(CONFIG_SMP),y)
 CDEFINES += -DQCA_CONFIG_SMP
 endif
 
+#Enable Channel Matrix restriction for all targets
+CDEFINES += -DWLAN_ENABLE_CHNL_MATRIX_RESTRICTION
+
 #features specific to mdm9630
 ifeq ($(CONFIG_ARCH_MDM9630), y)
 
@@ -1258,6 +1263,11 @@ endif
 #Enable/disable secure firmware feature
 ifeq ($(CONFIG_FEATURE_SECURE_FIRMWARE), 1)
 CDEFINES += -DFEATURE_SECURE_FIRMWARE
+endif
+
+#Enable/disable FW hash check for secure firmware feature
+ifeq ($(CONFIG_CLD_DEBUG), y)
+CDEFINES += -DFEATURE_FW_HASH_CHECK
 endif
 
 ifeq ($(CONFIG_ATH_PCIE_ACCESS_DEBUG), 1)

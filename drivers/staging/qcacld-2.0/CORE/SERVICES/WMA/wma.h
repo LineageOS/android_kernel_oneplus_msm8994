@@ -83,6 +83,8 @@
 #define WMA_RESUME_TIMEOUT                 3000
 #define WMA_TGT_WOW_TX_COMPLETE_TIMEOUT    2000
 #define MAX_MEM_CHUNKS                     32
+#define WMA_CRASH_INJECT_TIMEOUT           5000
+
 /*
    In prima 12 HW stations are supported including BCAST STA(staId 0)
    and SELF STA(staId 1) so total ASSOC stations which can connect to Prima
@@ -139,6 +141,7 @@
 #define WMA_HOST_ROAM_SCAN_REQID_PREFIX  0xA800
 /* Prefix used by scan requestor id on host */
 #define WMA_HOST_SCAN_REQUESTOR_ID_PREFIX 0xA000
+#define WMA_HW_DEF_SCAN_MAX_DURATION      30000 /* 30 secs */
 
 /* Max offchannel duration */
 #define WMA_BURST_SCAN_MAX_NUM_OFFCHANNELS  (3)
@@ -371,6 +374,7 @@ typedef struct {
 	u_int32_t ani_ofdm_level;
 	u_int32_t ani_cck_level;
 	u_int32_t cwmenable;
+	u_int32_t cts_cbw;
 	u_int32_t txchainmask;
 	u_int32_t rxchainmask;
 	u_int32_t txpow2g;
@@ -583,6 +587,8 @@ typedef struct {
 	vos_event_t wma_resume_event;
 	vos_event_t target_suspend;
 	vos_event_t wow_tx_complete;
+	vos_event_t recovery_event;
+
 	t_cfg_nv_param cfg_nv;
 
 	v_U16_t max_station;
@@ -1117,12 +1123,15 @@ u_int16_t get_regdmn_5g(u_int32_t reg_dmn);
 #define WMA_FW_TX_PPDU_STATS	0x4
 #define WMA_FW_TX_CONCISE_STATS 0x5
 #define WMA_FW_TX_RC_STATS	0x6
+#define WMA_FW_RX_REM_RING_BUF 0xc
 
 /*
  * Setting the Tx Comp Timeout to 1 secs.
  * TODO: Need to Revist the Timing
  */
 #define WMA_TX_FRAME_COMPLETE_TIMEOUT  1000
+#define WMA_TX_FRAME_BUFFER_NO_FREE    0
+#define WMA_TX_FRAME_BUFFER_FREE       1
 
 struct wma_tx_ack_work_ctx {
 	tp_wma_handle wma_handle;
@@ -1546,4 +1555,7 @@ typedef struct wma_roam_invoke_cmd
     u_int8_t bssid[6];
     v_U32_t channel;
 }t_wma_roam_invoke_cmd;
+
+int wma_crash_inject(tp_wma_handle wma_handle, uint32_t type,
+			uint32_t delay_time_ms);
 #endif

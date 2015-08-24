@@ -1850,6 +1850,7 @@ void sapComputeSpectWeight( tSapChSelSpectInfo* pSpectInfoParams,
         rssi = (v_S7_t)pSpectCh->rssiAgr;
 
         pSpectCh->weight = SAPDFS_NORMALISE_1000 * sapweightRssiCount(rssi, pSpectCh->bssCount);
+        pSpectCh->weight_copy = pSpectCh->weight;
 
         //------ Debug Info ------
         VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO_HIGH,
@@ -2000,7 +2001,7 @@ void sapSortChlWeightHT80(tSapChSelSpectInfo *pSpectInfoParams)
                best channel as the selected primary channel, update its
                weightage with the combined weight value */
             for (n=0; n<4; n++)
-                pSpectInfo[j+n].weight = ACS_WEIGHT_MAX;
+                pSpectInfo[j+n].weight = ACS_WEIGHT_MAX * 4;
 
             pSpectInfo[j+minIdx].weight = acsHT80Channels[i].weight;
         }
@@ -2010,11 +2011,11 @@ void sapSortChlWeightHT80(tSapChSelSpectInfo *pSpectInfoParams)
                skip this channel and those in the same HT80 width*/
             pSpectInfo[j].weight = ACS_WEIGHT_MAX;
             if ((pSpectInfo[j].chNum +4) == pSpectInfo[j+1].chNum)
-                pSpectInfo[j+1].weight = ACS_WEIGHT_MAX;
+                pSpectInfo[j+1].weight = ACS_WEIGHT_MAX * 4;
             if ((pSpectInfo[j].chNum +8) == pSpectInfo[j+2].chNum)
-                pSpectInfo[j+2].weight = ACS_WEIGHT_MAX;
+                pSpectInfo[j+2].weight = ACS_WEIGHT_MAX * 4;
             if ((pSpectInfo[j].chNum +12) == pSpectInfo[j+3].chNum)
-                pSpectInfo[j+3].weight = ACS_WEIGHT_MAX;
+                pSpectInfo[j+3].weight = ACS_WEIGHT_MAX * 4;
         }
     }
 
@@ -2023,7 +2024,7 @@ void sapSortChlWeightHT80(tSapChSelSpectInfo *pSpectInfoParams)
     {
         if ( CHANNEL_165 == pSpectInfo[j].chNum )
         {
-            pSpectInfo[j].weight = ACS_WEIGHT_MAX;
+            pSpectInfo[j].weight = ACS_WEIGHT_MAX * 4;
             break;
         }
     }
@@ -2092,15 +2093,15 @@ void sapSortChlWeightHT40_24G(tSapChSelSpectInfo *pSpectInfoParams)
                     if (pSpectInfo[j].weight <= pSpectInfo[j+4].weight)
                     {
                         pSpectInfo[j].weight = tmpWeight1;
-                        pSpectInfo[j+4].weight = ACS_WEIGHT_MAX;
-                        pSpectInfo[j+8].weight = ACS_WEIGHT_MAX;
+                        pSpectInfo[j+4].weight = ACS_WEIGHT_MAX * 2;
+                        pSpectInfo[j+8].weight = ACS_WEIGHT_MAX * 2;
                     }
                     else
                     {
                         pSpectInfo[j+4].weight = tmpWeight1;
                         /* for secondary channel selection */
-                        pSpectInfo[j].weight = ACS_WEIGHT_MAX - 1;
-                        pSpectInfo[j+8].weight = ACS_WEIGHT_MAX;
+                        pSpectInfo[j].weight = ACS_WEIGHT_MAX * 2 - 1;
+                        pSpectInfo[j+8].weight = ACS_WEIGHT_MAX * 2;
                     }
                 }
                 else
@@ -2108,15 +2109,15 @@ void sapSortChlWeightHT40_24G(tSapChSelSpectInfo *pSpectInfoParams)
                     if (pSpectInfo[j+4].weight <= pSpectInfo[j+8].weight)
                     {
                         pSpectInfo[j+4].weight = tmpWeight2;
-                        pSpectInfo[j].weight = ACS_WEIGHT_MAX;
+                        pSpectInfo[j].weight = ACS_WEIGHT_MAX * 2;
                         /* for secondary channel selection */
-                        pSpectInfo[j+8].weight = ACS_WEIGHT_MAX - 1;
+                        pSpectInfo[j+8].weight = ACS_WEIGHT_MAX * 2 - 1;
                     }
                     else
                     {
                         pSpectInfo[j+8].weight = tmpWeight2;
-                        pSpectInfo[j].weight = ACS_WEIGHT_MAX;
-                        pSpectInfo[j+4].weight = ACS_WEIGHT_MAX;
+                        pSpectInfo[j].weight = ACS_WEIGHT_MAX * 2;
+                        pSpectInfo[j+4].weight = ACS_WEIGHT_MAX * 2;
                     }
                 }
             }
@@ -2126,17 +2127,17 @@ void sapSortChlWeightHT40_24G(tSapChSelSpectInfo *pSpectInfoParams)
                 if (pSpectInfo[j].weight <= pSpectInfo[j+4].weight)
                 {
                     pSpectInfo[j].weight = tmpWeight1;
-                    pSpectInfo[j+4].weight = ACS_WEIGHT_MAX;
+                    pSpectInfo[j+4].weight = ACS_WEIGHT_MAX * 2;
                 }
                 else
                 {
                     pSpectInfo[j+4].weight = tmpWeight1;
-                    pSpectInfo[j].weight = ACS_WEIGHT_MAX;
+                    pSpectInfo[j].weight = ACS_WEIGHT_MAX * 2;
                 }
             }
         }
         else
-            pSpectInfo[j].weight = ACS_WEIGHT_MAX;
+            pSpectInfo[j].weight = ACS_WEIGHT_MAX * 2;
     }
 
     sapSortChlWeight(pSpectInfoParams);
@@ -2191,19 +2192,19 @@ void sapSortChlWeightHT40_5G(tSapChSelSpectInfo *pSpectInfoParams)
                 pSpectInfo[j].weight = acsHT40Channels5G[i].weight;
                 /* mark the adjacent channel's weight as max value so
                    that it will be sorted to the bottom */
-                pSpectInfo[j+1].weight = ACS_WEIGHT_MAX;
+                pSpectInfo[j+1].weight = ACS_WEIGHT_MAX * 2;
             }
             else
             {
                 pSpectInfo[j+1].weight = acsHT40Channels5G[i].weight;
                 /* mark the adjacent channel's weight as max value so
                    that it will be sorted to the bottom */
-                pSpectInfo[j].weight = ACS_WEIGHT_MAX;
+                pSpectInfo[j].weight = ACS_WEIGHT_MAX * 2;
             }
 
         }
         else
-           pSpectInfo[j].weight = ACS_WEIGHT_MAX;
+           pSpectInfo[j].weight = ACS_WEIGHT_MAX * 2;
     }
 
     /* avoid channel 165 by setting its weight to max */
@@ -2212,7 +2213,7 @@ void sapSortChlWeightHT40_5G(tSapChSelSpectInfo *pSpectInfoParams)
     {
         if ( CHANNEL_165  == pSpectInfo[j].chNum )
         {
-            pSpectInfo[j].weight = ACS_WEIGHT_MAX;
+            pSpectInfo[j].weight = ACS_WEIGHT_MAX * 2;
             break;
         }
     }
@@ -2552,7 +2553,7 @@ v_U8_t sapSelectChannel(tHalHandle halHandle, ptSapContext pSapCtx,  tScanResult
                     continue;
                 }
 
-                if (pSpectInfoParams->pSpectCh[count].weight >
+                if (pSpectInfoParams->pSpectCh[count].weight_copy >
                                   pSapCtx->acsBandSwitchThreshold)
                 {
                     /* the best channel exceeds the threshold
@@ -2571,7 +2572,7 @@ v_U8_t sapSelectChannel(tHalHandle halHandle, ptSapContext pSapCtx,  tScanResult
                     {
                         /* all bands are scanned, compare current best channel
                            with channel scanned previously */
-                        if ( pSpectInfoParams->pSpectCh[count].weight >
+                        if ( pSpectInfoParams->pSpectCh[count].weight_copy >
                               pSapCtx->acsBestChannelInfo.weight)
                         {
                             /* previous stored channel is better */
@@ -2581,7 +2582,7 @@ v_U8_t sapSelectChannel(tHalHandle halHandle, ptSapContext pSapCtx,  tScanResult
                         {
                             pSapCtx->acsBestChannelInfo.channelNum = bestChNum;
                             pSapCtx->acsBestChannelInfo.weight =
-                                       pSpectInfoParams->pSpectCh[count].weight;
+                                  pSpectInfoParams->pSpectCh[count].weight_copy;
                         }
                     }
                 }
@@ -2589,7 +2590,7 @@ v_U8_t sapSelectChannel(tHalHandle halHandle, ptSapContext pSapCtx,  tScanResult
                 {
                     pSapCtx->acsBestChannelInfo.channelNum = bestChNum;
                     pSapCtx->acsBestChannelInfo.weight =
-                                   pSpectInfoParams->pSpectCh[count].weight;
+                                  pSpectInfoParams->pSpectCh[count].weight_copy;
                 }
             }
 
@@ -2600,7 +2601,7 @@ v_U8_t sapSelectChannel(tHalHandle halHandle, ptSapContext pSapCtx,  tScanResult
                     /* Give preference to Non-overlap channels */
                     if (sapFilterOverLapCh(pSapCtx,
                             pSpectInfoParams->pSpectCh[count].chNum) &&
-                        (pSpectInfoParams->pSpectCh[count].weight <=
+                        (pSpectInfoParams->pSpectCh[count].weight_copy <=
                                  pSapCtx->acsBestChannelInfo.weight))
                     {
                         tmpChNum = pSpectInfoParams->pSpectCh[count].chNum;

@@ -392,6 +392,7 @@ tSmeCmd *smeGetCommandBuffer( tpAniSirGlobal pMac )
 {
     tSmeCmd *pRetCmd = NULL, *pTempCmd = NULL;
     tListElem *pEntry;
+    static int smeCommandQueueFull = 0;
 
     pEntry = csrLLRemoveHead( &pMac->sme.smeCmdFreeList, LL_ACCESS_LOCK );
 
@@ -401,8 +402,11 @@ tSmeCmd *smeGetCommandBuffer( tpAniSirGlobal pMac )
     if ( pEntry )
     {
         pRetCmd = GET_BASE_ADDR( pEntry, tSmeCmd, Link );
+        /* reset when free list is available */
+        smeCommandQueueFull = 0;
     }
-    else {
+    else
+    {
         int idx = 1;
 
         //Cannot change pRetCmd here since it needs to return later.
@@ -425,11 +429,14 @@ tSmeCmd *smeGetCommandBuffer( tpAniSirGlobal pMac )
         //dump what is in the pending queue
         csrLLLock(&pMac->sme.smeCmdPendingList);
         pEntry = csrLLPeekHead( &pMac->sme.smeCmdPendingList, LL_ACCESS_NOLOCK );
-        while(pEntry)
+        while(pEntry && !smeCommandQueueFull)
         {
             pTempCmd = GET_BASE_ADDR( pEntry, tSmeCmd, Link );
-            smsLog( pMac, LOGE, "Out of command buffer.... SME pending command #%d (0x%X)",
-                    idx++, pTempCmd->command );
+            /* Print only 1st five commands from pending queue. */
+            if (idx <= 5)
+                smsLog( pMac, LOGE, "Out of command buffer.... SME pending command #%d (0x%X)",
+                        idx, pTempCmd->command );
+            idx++;
             if( eSmeCsrCommandMask & pTempCmd->command )
             {
                 //CSR command is stuck. See what the reason code is for that command
@@ -439,18 +446,28 @@ tSmeCmd *smeGetCommandBuffer( tpAniSirGlobal pMac )
         }
         csrLLUnlock(&pMac->sme.smeCmdPendingList);
 
+        idx = 1;
         //There may be some more command in CSR's own pending queue
         csrLLLock(&pMac->roam.roamCmdPendingList);
         pEntry = csrLLPeekHead( &pMac->roam.roamCmdPendingList, LL_ACCESS_NOLOCK );
-        while(pEntry)
+        while(pEntry && !smeCommandQueueFull)
         {
             pTempCmd = GET_BASE_ADDR( pEntry, tSmeCmd, Link );
-            smsLog( pMac, LOGE, "Out of command buffer.... CSR pending command #%d (0x%X)",
-                    idx++, pTempCmd->command );
+            /* Print only 1st five commands from CSR pending queue */
+            if (idx <= 5)
+                smsLog( pMac, LOGE,
+                     "Out of command buffer.... CSR roamCmdPendingList command #%d (0x%X)",
+                     idx, pTempCmd->command );
+            idx++;
             dumpCsrCommandInfo(pMac, pTempCmd);
             pEntry = csrLLNext( &pMac->roam.roamCmdPendingList, pEntry, LL_ACCESS_NOLOCK );
         }
+        /* Increament static variable so that it prints pending command only once*/
+        smeCommandQueueFull++;
         csrLLUnlock(&pMac->roam.roamCmdPendingList);
+
+        /* panic with out-of-command */
+        VOS_BUG(0);
     }
 
     /* memset to zero */
@@ -856,6 +873,8 @@ sme_process_cmd:
                     {
                         //Force this command to wake up the chip
                         csrLLInsertHead( &pMac->sme.smeCmdActiveList, &pPmcCmd->Link, LL_ACCESS_NOLOCK );
+                        MTRACE(vos_trace(VOS_MODULE_ID_SME,
+                           TRACE_CODE_SME_COMMAND, pPmcCmd->sessionId, pPmcCmd->command));
                         csrLLUnlock( &pMac->sme.smeCmdActiveList );
                         /* Handle PS Offload Case Separately */
                         if(pMac->psOffloadEnabled)
@@ -11601,19 +11620,19 @@ VOS_STATUS sme_SelectCBMode(tHalHandle hHal, eCsrPhyMode eCsrPhyMode, tANI_U8 ch
    {
       if (pMac->roam.configParam.channelBondingMode5GHz) {
           if ( channel== 36 || channel == 52 || channel == 100 ||
-                channel == 116 || channel == 149 )
+                channel == 116 || channel == 149 || channel == 132)
           {
              smeConfig.csrConfig.channelBondingMode5GHz =
                 eCSR_INI_QUADRUPLE_CHANNEL_20MHZ_LOW_40MHZ_LOW;
           }
           else if ( channel == 40 || channel == 56 || channel == 104 ||
-                channel == 120 || channel == 153 )
+                channel == 120 || channel == 153 || channel == 136)
           {
              smeConfig.csrConfig.channelBondingMode5GHz =
                 eCSR_INI_QUADRUPLE_CHANNEL_20MHZ_HIGH_40MHZ_LOW;
           }
           else if ( channel == 44 || channel == 60 || channel == 108 ||
-                channel == 124 || channel == 157 )
+                channel == 124 || channel == 157 || channel == 140)
           {
              smeConfig.csrConfig.channelBondingMode5GHz =
                 eCSR_INI_QUADRUPLE_CHANNEL_20MHZ_LOW_40MHZ_HIGH;
@@ -11624,20 +11643,10 @@ VOS_STATUS sme_SelectCBMode(tHalHandle hHal, eCsrPhyMode eCsrPhyMode, tANI_U8 ch
              smeConfig.csrConfig.channelBondingMode5GHz =
                 eCSR_INI_QUADRUPLE_CHANNEL_20MHZ_HIGH_40MHZ_HIGH;
           }
-          else if ( channel == 165 || channel == 140 )
+          else if ( channel == 165 )
           {
              smeConfig.csrConfig.channelBondingMode5GHz =
                 eCSR_INI_SINGLE_CHANNEL_CENTERED;
-          }
-          else if ( channel == 132 )
-          {
-             smeConfig.csrConfig.channelBondingMode5GHz =
-                eCSR_INI_DOUBLE_CHANNEL_LOW_PRIMARY;
-          }
-          else if ( channel == 136 )
-          {
-             smeConfig.csrConfig.channelBondingMode5GHz =
-                eCSR_INI_DOUBLE_CHANNEL_HIGH_PRIMARY;
           }
       }
       /*TODO: Set HT40+ / HT40- for channel 5-7 based on ACS */
@@ -11652,7 +11661,6 @@ VOS_STATUS sme_SelectCBMode(tHalHandle hHal, eCsrPhyMode eCsrPhyMode, tANI_U8 ch
              smeConfig.csrConfig.channelBondingMode24GHz =
                 eCSR_INI_SINGLE_CHANNEL_CENTERED;
       }
-
    }
 #endif
 
@@ -11663,7 +11671,7 @@ VOS_STATUS sme_SelectCBMode(tHalHandle hHal, eCsrPhyMode eCsrPhyMode, tANI_U8 ch
           if ( channel== 40 || channel == 48 || channel == 56 ||
                 channel == 64 || channel == 104 || channel == 112 ||
                 channel == 120 || channel == 128 || channel == 136 ||
-                channel == 153 || channel == 161 )
+                channel == 153 || channel == 161 || channel == 144)
           {
              smeConfig.csrConfig.channelBondingMode5GHz =
                 eCSR_INI_DOUBLE_CHANNEL_HIGH_PRIMARY;
@@ -11671,12 +11679,12 @@ VOS_STATUS sme_SelectCBMode(tHalHandle hHal, eCsrPhyMode eCsrPhyMode, tANI_U8 ch
           else if ( channel== 36 || channel == 44 || channel == 52 ||
                 channel == 60 || channel == 100 || channel == 108 ||
                 channel == 116 || channel == 124 || channel == 132 ||
-                channel == 149 || channel == 157 )
+                channel == 149 || channel == 157 || channel == 140)
           {
              smeConfig.csrConfig.channelBondingMode5GHz =
                 eCSR_INI_DOUBLE_CHANNEL_LOW_PRIMARY;
           }
-          else if ( channel == 165 || channel == 140)
+          else if ( channel == 165 )
           {
              smeConfig.csrConfig.channelBondingMode5GHz =
                 eCSR_INI_SINGLE_CHANNEL_CENTERED;
@@ -14213,4 +14221,113 @@ eHalStatus sme_handle_dfs_chan_scan(tHalHandle hHal, tANI_U8 dfs_flag)
     return status;
 }
 
+/**
+ * sme_update_nss() - SME API to change the number for spatial streams (1 or 2)
+ * @hal:            - Handle returned by macOpen
+ * @nss:            - Number of spatial streams
+ *
+ * This function is used to update the number of spatial streams supported.
+ *
+ * Return: Success upon successfully changing nss else failure
+ *
+ */
+eHalStatus sme_update_nss(tHalHandle h_hal, uint8_t nss)
+{
+	eHalStatus status;
+	tpAniSirGlobal mac_ctx = PMAC_STRUCT(h_hal);
+	uint32_t  i, value = 0;
+	union {
+		uint16_t                        cfg_value16;
+		tSirMacHTCapabilityInfo         ht_cap_info;
+	} uHTCapabilityInfo;
+	tCsrRoamSession *csr_session;
 
+	status = sme_AcquireGlobalLock(&mac_ctx->sme);
+
+	if (eHAL_STATUS_SUCCESS == status) {
+		mac_ctx->roam.configParam.enable2x2 = (nss == 1) ? 0 : 1;
+
+		/* get the HT capability info*/
+		ccmCfgGetInt(mac_ctx, WNI_CFG_HT_CAP_INFO, &value);
+		uHTCapabilityInfo.cfg_value16 = (0xFFFF & value);
+
+		for (i = 0; i < CSR_ROAM_SESSION_MAX; i++) {
+			if (CSR_IS_SESSION_VALID(mac_ctx, i)) {
+				csr_session = CSR_GET_SESSION(mac_ctx, i);
+				if (!csr_session) {
+					smsLog(mac_ctx, LOGE,
+					       FL("Session does not exist for interface %d"),
+					       i);
+					continue;
+				}
+				csr_session->htConfig.ht_tx_stbc =
+					uHTCapabilityInfo.ht_cap_info.txSTBC;
+			}
+		}
+
+		sme_ReleaseGlobalLock(&mac_ctx->sme);
+	}
+
+	return status;
+}
+
+uint8_t sme_is_any_session_in_connected_state(tHalHandle h_hal)
+{
+	tpAniSirGlobal mac_ctx = PMAC_STRUCT(h_hal);
+	eHalStatus     status;
+	uint8_t        ret     = FALSE;
+
+	status = sme_AcquireGlobalLock(&mac_ctx->sme);
+	if (eHAL_STATUS_SUCCESS == status) {
+		ret = csrIsAnySessionInConnectState(mac_ctx);
+		sme_ReleaseGlobalLock(&mac_ctx->sme);
+	}
+	return ret;
+}
+
+/**
+ * smeNeighborRoamIsHandoffInProgress() - Function to know if
+ * handoff is in progress
+ * @hal:                Handle returned by macOpen
+ * @sessionId: sessionId of the STA session
+ *
+ * This function is a wrapper to call
+ * csrNeighborRoamIsHandoffInProgress to know if handoff is in
+ * progress
+ *
+ * Return: True or False
+ *
+ */
+bool smeNeighborRoamIsHandoffInProgress(tHalHandle hHal, tANI_U8 sessionId)
+{
+	return csrNeighborRoamIsHandoffInProgress(PMAC_STRUCT(hHal), sessionId);
+}
+
+/**
+ * sme_disable_non_fcc_channel() - non-fcc channel disable request
+ * @hal: HAL pointer
+ * @fcc_constraint: true: disable, false; enable
+ *
+ * Return: eHalStatus.
+ */
+eHalStatus sme_disable_non_fcc_channel(tHalHandle hal, bool fcc_constraint)
+{
+	eHalStatus status = eHAL_STATUS_SUCCESS;
+	tpAniSirGlobal mac_ptr  = PMAC_STRUCT(hal);
+
+	status = sme_AcquireGlobalLock(&mac_ptr->sme);
+
+	if (eHAL_STATUS_SUCCESS == status) {
+
+		if (fcc_constraint != mac_ptr->scan.fcc_constraint) {
+			mac_ptr->scan.fcc_constraint = fcc_constraint;
+
+			/* update the channel list to the firmware */
+			status = csrUpdateChannelList(mac_ptr);
+		}
+
+		sme_ReleaseGlobalLock(&mac_ptr->sme);
+	}
+
+	return status;
+}
