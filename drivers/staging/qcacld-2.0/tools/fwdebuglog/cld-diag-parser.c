@@ -35,14 +35,6 @@
 #include <sys/socket.h>
 #include <linux/netlink.h>
 #include "cld-diag-parser.h"
-#ifdef CONFIG_ANDROID_LOG
-#include <android/log.h>
-
-#define FWDEBUG_LOG_NAME        "ROME"
-#define FWDEBUG_NAME            "ROME_DEBUG"
-#define android_printf(...) \
-       __android_log_print(ANDROID_LOG_INFO, FWDEBUG_LOG_NAME, __VA_ARGS__);
-#endif
 
 typedef struct diag_entry{
     uint32_t id;
@@ -665,8 +657,10 @@ parse_dbfile()
                 p += strlen("VERSION:");
                 gdiag_header->file_version = atoi(p);
             }
-            else
+            else {
+                fclose(fd);
                 return 0;
+            }
         }
         else {
             p = strtok_r(line, ",", &save);
@@ -719,8 +713,10 @@ parse_dbfile()
                 pack = strdup(pbuf);
                 free(q);
             }
-            if (!diag_insert_db(format, pack, id))
+            if (!diag_insert_db(format, pack, id)) {
+                fclose(fd);
                 return 0;
+            }
         }
         memset(line, 0 , sizeof(line));
     }
@@ -748,6 +744,9 @@ cnssdiag_register_kernel_logging(int sock_fd, struct nlmsghdr *nlh)
     wnl->wmsg.length = sizeof(tAniHdr);
     wnl->wmsg.type = ANI_NL_MSG_LOG_REG_TYPE;
     if (sendto(sock_fd, (char*)wnl, nlh->nlmsg_len,0,NULL, 0) < 0) {
+        debug_printf("%s: HOST_MSG:Failed to send message over NL"
+                     " errno:%d - %s\n",
+                     __func__, errno, strerror(errno));
         return -1;
     }
 
@@ -764,6 +763,9 @@ cnssdiag_register_kernel_logging(int sock_fd, struct nlmsghdr *nlh)
     regReq = (tAniNlAppRegReq *)(wnl + 1);
     regReq->pid = getpid();
     if (sendto(sock_fd, (char*)wnl, nlh->nlmsg_len,0,NULL, 0) < 0) {
+        debug_printf("%s: EVENT_LOG:Failed to send message over NL"
+                     " errno:%d - %s\n",
+                     __func__, errno, strerror(errno));
         return -1;
     }
     return 0;
@@ -800,6 +802,7 @@ sendcnss_cmd(int sock_fd, int32_t cmd, int len, uint8_t *buf)
     nlh = malloc(NLMSG_SPACE(slot_len));
     if (nlh == NULL) {
         fprintf(stderr, "Cannot allocate memory \n");
+        free(slot_buf);
         return -1;
     }
     memset(nlh, 0, NLMSG_SPACE(slot_len));
@@ -809,7 +812,9 @@ sendcnss_cmd(int sock_fd, int32_t cmd, int len, uint8_t *buf)
     nlh->nlmsg_flags = NLM_F_REQUEST;
 
     memcpy(NLMSG_DATA(nlh), slot_buf, slot_len);
+    free(slot_buf);
 
+    memset(&msg, 0, sizeof(msg));
     iov.iov_base = (void *)nlh;
     iov.iov_len = nlh->nlmsg_len;
     msg.msg_name = (void *)&dest_addr;
@@ -824,22 +829,15 @@ sendcnss_cmd(int sock_fd, int32_t cmd, int len, uint8_t *buf)
 
 
 void
-diag_initialize(boolean isDriverLoaded, int sock_fd, uint32_t optionflag)
+diag_initialize(int sock_fd, uint32_t optionflag)
 {
-    if (isDriverLoaded) {
-        if (!gisdiag_init) {
-            uint32_t ret;
-            goptionflag = optionflag;
-            diag_free_db();
-            ret = parse_dbfile();
-            if (ret > 1)
-                gisdiag_init = TRUE;
-            gdiag_sock_fd = sock_fd;
-        }
-    } else {
-        gdiag_sock_fd = 0;
-        gisdiag_init = FALSE;
-    }
+     uint32_t ret;
+     goptionflag = optionflag;
+     diag_free_db();
+     ret = parse_dbfile();
+     if (ret > 1)
+         gisdiag_init = TRUE;
+     gdiag_sock_fd = sock_fd;
 }
 
 void
@@ -908,7 +906,7 @@ process_diagfw_msg(uint8_t *datap, uint16_t len, uint32_t optionflag,
         * then turn on event not received hence
         * before throwing out error initialize again
         */
-        diag_initialize(1, sock_fd, optionflag);
+        diag_initialize(sock_fd, optionflag);
         if (!gisdiag_init) {
             diag_printf("**ERROR** Diag not Initialized",
                           0, 4, optionflag, 0, NULL);
@@ -990,11 +988,9 @@ process_diagfw_msg(uint8_t *datap, uint16_t len, uint32_t optionflag,
             }
             entry = diag_find_by_id(id);
             if (entry) {
-                if (entry->format && entry->pack) {
+                if ((payloadlen > 0) && (entry->format && entry->pack)) {
                     debug_printf("entry->format = %s pack = %s\n",
                                     entry->format, entry->pack);
-                }
-                if ((payloadlen > 0) && entry->pack) {
                     if (payloadlen < BUF_SIZ)
                         memcpy(payload_buf, payload, payloadlen);
                     else

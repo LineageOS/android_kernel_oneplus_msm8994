@@ -240,6 +240,7 @@ static const hdd_freq_chan_map_t freq_chan_map[] = { {2412, 1}, {2417, 2},
 #define WE_SET_EARLY_RX_DRIFT_SAMPLE          82
 /* Private ioctl for packet power save */
 #define WE_PPS_5G_EBT                         83
+#define WE_SET_CTS_CBW                        84
 
 /* Private ioctls and their sub-ioctls */
 #define WLAN_PRIV_SET_NONE_GET_INT    (SIOCIWFIRSTPRIV + 1)
@@ -4612,6 +4613,7 @@ static int iw_setint_getnone(struct net_device *dev, struct iw_request_info *inf
     v_U8_t nEnableSuspendOld;
 #endif
     INIT_COMPLETION(pWextState->completion_var);
+    memset(&smeConfig, 0x00, sizeof(smeConfig));
 
     if ((WLAN_HDD_GET_CTX(pAdapter))->isLogpInProgress)
     {
@@ -4626,7 +4628,6 @@ static int iw_setint_getnone(struct net_device *dev, struct iw_request_info *inf
         {
             if((ENABLE_11D == set_value) || (DISABLE_11D == set_value)) {
 
-                memset(&smeConfig, 0x00, sizeof(smeConfig));
                 sme_GetConfigParam(hHal, &smeConfig);
                 smeConfig.csrConfig.Is11dSupportEnabled = (v_BOOL_t)set_value;
 
@@ -4976,10 +4977,15 @@ static int iw_setint_getnone(struct net_device *dev, struct iw_request_info *inf
 
         case WE_SET_NSS:
         {
-           hddLog(LOG1, "WMI_VDEV_PARAM_NSS val %d", set_value);
-           ret = process_wma_set_command((int)pAdapter->sessionId,
-                                         (int)WMI_VDEV_PARAM_NSS,
-                                         set_value, VDEV_CMD);
+           hddLog(LOG1, "Set NSS = %d", set_value);
+           if ((set_value > 2) || (set_value <= 0)) {
+               hddLog(LOGE, "NSS greater than 2 not supported");
+               ret = -EINVAL;
+           } else {
+               if (VOS_STATUS_SUCCESS !=
+                     hdd_update_nss(WLAN_HDD_GET_CTX(pAdapter), set_value))
+                   ret = -EINVAL;
+           }
            break;
         }
 
@@ -5211,7 +5217,6 @@ static int iw_setint_getnone(struct net_device *dev, struct iw_request_info *inf
                        phddctx->cfg_ini->nChannelBondingMode5GHz)))
                chwidth = true;
 
-           memset(&smeConfig, 0x00, sizeof(smeConfig));
            sme_GetConfigParam(hHal, &smeConfig);
            switch (set_value) {
            case eHT_CHANNEL_WIDTH_20MHZ:
@@ -5300,6 +5305,15 @@ static int iw_setint_getnone(struct net_device *dev, struct iw_request_info *inf
            hddLog(LOG1, "WMI_PDEV_PARAM_DYNAMIC_BW val %d", set_value);
            ret = process_wma_set_command((int)pAdapter->sessionId,
                                          (int)WMI_PDEV_PARAM_DYNAMIC_BW,
+                                         set_value, PDEV_CMD);
+           break;
+        }
+
+        case WE_SET_CTS_CBW:
+        {
+           hddLog(LOG1, "WE_SET_CTS_CBW val %d", set_value);
+           ret = process_wma_set_command((int)pAdapter->sessionId,
+                                         (int)WMI_PDEV_PARAM_CTS_CBW,
                                          set_value, PDEV_CMD);
            break;
         }
@@ -6168,11 +6182,9 @@ static int iw_setnone_getint(struct net_device *dev, struct iw_request_info *inf
 
         case WE_GET_NSS:
         {
-           hddLog(LOG1, "GET WMI_VDEV_PARAM_NSS");
-           *value = wma_cli_get_command(wmapvosContext,
-                                        (int)pAdapter->sessionId,
-                                        (int)WMI_VDEV_PARAM_NSS,
-                                        VDEV_CMD);
+           sme_GetConfigParam(hHal, &smeConfig);
+           *value = (smeConfig.csrConfig.enable2x2 == 0) ? 1 : 2;
+           hddLog(LOG1, "GET_NSS: Current NSS:%d", *value);
            break;
         }
 
@@ -6896,7 +6908,7 @@ static int iw_get_char_setnone(struct net_device *dev, struct iw_request_info *i
                 adapter_num++;
             }
 
-            if (pMac) {
+            if (hHal) {
                 /* Printing Lim State starting with global lim states */
                 buf = scnprintf(extra + len, WE_MAX_STR_LEN - len,
                         "\n \n LIM STATES:-"
@@ -8160,6 +8172,13 @@ static int iw_set_keepalive_params(struct net_device *dev, struct iw_request_inf
                                   "%s:LOGP in Progress. Ignore!!!", __func__);
         return 0;
     }
+
+    if (pRequest->timePeriod > WNI_CFG_INFRA_STA_KEEP_ALIVE_PERIOD_STAMAX) {
+        hddLog(LOGE, FL("Value of timePeriod exceed Max limit %d"),
+               pRequest->timePeriod);
+        return -EINVAL;
+    }
+
 
     /* Debug display of request components. */
     hddLog(VOS_TRACE_LEVEL_INFO,
@@ -9540,6 +9559,8 @@ int iw_set_two_ints_getnone(struct net_device *dev,
 #ifdef DEBUG
     case WE_SET_FW_CRASH_INJECT:
         hddLog(LOGE, "WE_SET_FW_CRASH_INJECT: %d %d", value[1], value[2]);
+        pr_err("SSR is triggered by iwpriv CRASH_INJECT: %d %d\n",
+                                                value[1], value[2]);
         ret = process_wma_set_command_twoargs((int) pAdapter->sessionId,
                                               (int) GEN_PARAM_CRASH_INJECT,
                                               value[1], value[2], GEN_CMD);
@@ -9811,6 +9832,11 @@ static const struct iw_priv_args we_private_args[] = {
         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
         0,
         "cwmenable" },
+
+    {   WE_SET_CTS_CBW,
+        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
+        0,
+        "cts_cbw" },
 
     {  WE_SET_GTX_HT_MCS,
        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
@@ -10963,22 +10989,13 @@ int hdd_register_wext(struct net_device *dev)
 
 int hdd_UnregisterWext(struct net_device *dev)
 {
-#if 0
-   hdd_wext_state_t *wextBuf;
-   hdd_adapter_t *pAdapter = WLAN_HDD_GET_PRIV_PTR(dev);
+	hddLog(LOG1, FL("dev(%p)"), dev);
 
-   ENTER();
-   // Set up the pointer to the Wireless Extensions state structure
-   wextBuf = pAdapter->pWextState;
+	if (dev != NULL) {
+		rtnl_lock();
+		dev->wireless_handlers = NULL;
+		rtnl_unlock();
+	}
 
-   // De-allocate the Wireless Extensions state structure
-   kfree(wextBuf);
-
-   // Clear out the pointer to the Wireless Extensions state structure
-   pAdapter->pWextState = NULL;
-
-   EXIT();
-#endif
-   dev->wireless_handlers = NULL;
-   return 0;
+	return 0;
 }

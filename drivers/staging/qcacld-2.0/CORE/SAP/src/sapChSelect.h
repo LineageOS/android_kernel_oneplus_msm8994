@@ -113,7 +113,7 @@ typedef enum
     CHANNEL_14
 } tSapChannel;
 
-#define MAX_80MHZ_BANDS 5
+#define MAX_80MHZ_BANDS 6
 #define SAP_80MHZ_MASK     0x0F
 #define SAP_40MHZ_MASK_L   0x03
 #define SAP_40MHZ_MASK_H   0x0C
@@ -158,6 +158,7 @@ typedef struct {
     v_U16_t bssCount;   // bss found in scanresult for this channel
     v_S31_t rssiAgr;    // Max value of rssi among all BSS(es) from scanresult for this channel
     v_U32_t weight;     // Weightage of this channel
+    v_U32_t weight_copy; //copy of the orignal weight
     v_BOOL_t valid;     // Is this a valid center frequency for regulatory domain
 } tSapSpectChInfo;//tDfsSpectChInfo;
 
@@ -190,7 +191,11 @@ typedef struct sSapTxLeakInfo {
 
 typedef struct sSapChanMatrixInfo {
     v_U8_t channel;         /* channel to switch from */
+#ifdef FEATURE_WLAN_CH144
+    tSapTxLeakInfo chan_matrix[RF_CHAN_144 - RF_CHAN_36 + 1];
+#else
     tSapTxLeakInfo chan_matrix[RF_CHAN_140 - RF_CHAN_36 + 1];
+#endif
 } tSapChanMatrixInfo;
 
 #endif // if !defined __SAP_CH_SELECT_H

@@ -69,7 +69,7 @@ static v_BOOL_t init_by_reg_core = VOS_FALSE;
  * Preprocessor Definitions and Constants
  * -------------------------------------------------------------------------*/
 #define MAX_COUNTRY_COUNT        300
-
+#define REG_WAIT_TIME            50
 /*
  * This is a set of common rules used by our world regulatory domains.
  * We have 12 world regulatory domains. To save space we consolidate
@@ -1124,6 +1124,13 @@ VOS_STATUS vos_nv_getRegDomainFromCountryCode( v_REGDOMAIN_t *pRegDomain,
         return VOS_STATUS_E_FAULT;
     }
 
+    if (pHddCtx->isLogpInProgress) {
+        VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+                   (" SSR in progress, return") );
+        *pRegDomain = temp_reg_domain;
+         return VOS_STATUS_SUCCESS;
+    }
+
     wiphy = pHddCtx->wiphy;
 
     if (false == wiphy->registered) {
@@ -1172,8 +1179,13 @@ VOS_STATUS vos_nv_getRegDomainFromCountryCode( v_REGDOMAIN_t *pRegDomain,
     if ((COUNTRY_INIT == source) && (VOS_FALSE == init_by_reg_core)) {
         init_by_driver = VOS_TRUE;
 
-        if (('0' != country_code[0]) || ('0' != country_code[1]))
+        if (('0' != country_code[0]) || ('0' != country_code[1])) {
+            INIT_COMPLETION(pHddCtx->reg_init);
             regulatory_hint(wiphy, country_code);
+            wait_for_completion_timeout(&pHddCtx->reg_init,
+                                        msecs_to_jiffies(REG_WAIT_TIME));
+        }
+
     } else if (COUNTRY_IE == source || COUNTRY_USER == source) {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)) || defined(WITH_BACKPORTS)
         regulatory_hint_user(country_code, NL80211_USER_REG_HINT_USER);
@@ -1552,18 +1564,20 @@ int wlan_hdd_linux_reg_notifier(struct wiphy *wiphy,
             hdd_checkandupdate_phymode( pHddCtx);
         }
 
-        if ((VOS_TRUE == init_by_reg_core) || (VOS_TRUE == init_by_driver)) {
-            /* now pass the new country information to sme */
-            if (request->alpha2[0] == '0' && request->alpha2[1] == '0')
-            {
-                sme_GenericChangeCountryCode(pHddCtx->hHal, country_code,
-                                             REGDOMAIN_COUNT);
-            }
-            else
-            {
-                sme_GenericChangeCountryCode(pHddCtx->hHal, country_code,
+        if (NL80211_REGDOM_SET_BY_DRIVER == request->initiator)
+            complete(&pHddCtx->reg_init);
+
+
+        /* now pass the new country information to sme */
+        if (request->alpha2[0] == '0' && request->alpha2[1] == '0')
+        {
+            sme_GenericChangeCountryCode(pHddCtx->hHal, country_code,
+                                         REGDOMAIN_COUNT);
+        }
+        else
+        {
+            sme_GenericChangeCountryCode(pHddCtx->hHal, country_code,
                                          temp_reg_domain);
-            }
         }
 
         if ((VOS_FALSE == init_by_driver) &&
@@ -1646,6 +1660,8 @@ VOS_STATUS vos_init_wiphy_from_eeprom(void)
          return VOS_STATUS_E_FAULT;
       }
    }
+
+   init_completion(&pHddCtx->reg_init);
 
    /* send CTL info to firmware */
    regdmn_set_regval(&pHddCtx->reg);

@@ -56,6 +56,7 @@
 #include <net/cfg80211.h>
 #include <net/ieee80211_radiotap.h>
 #include "sapApi.h"
+#include <vos_sched.h>
 
 #ifdef FEATURE_WLAN_TDLS
 #include "wlan_hdd_tdls.h"
@@ -359,12 +360,14 @@ static struct sk_buff* hdd_mon_tx_fetch_pkt(hdd_adapter_t* pAdapter)
    return skb;
 }
 
-void hdd_mon_tx_mgmt_pkt(hdd_adapter_t* pAdapter)
+static void __hdd_mon_tx_mgmt_pkt(hdd_adapter_t* pAdapter)
 {
    hdd_cfg80211_state_t *cfgState;
    struct sk_buff* skb;
    hdd_adapter_t* pMonAdapter = NULL;
    struct ieee80211_hdr *hdr;
+   hdd_context_t *hdd_ctx;
+   int ret = 0;
 
    if (pAdapter == NULL)
    {
@@ -372,6 +375,13 @@ void hdd_mon_tx_mgmt_pkt(hdd_adapter_t* pAdapter)
        FL("pAdapter is NULL"));
       VOS_ASSERT(0);
       return;
+   }
+
+   hdd_ctx = WLAN_HDD_GET_CTX(pAdapter);
+   ret = wlan_hdd_validate_context(hdd_ctx);
+   if (0 != ret) {
+       hddLog(LOGE, FL("HDD context is not valid"));
+       return;
    }
 
    pMonAdapter = hdd_get_adapter( pAdapter->pHddCtx, WLAN_HDD_MONITOR );
@@ -459,10 +469,36 @@ fail:
    return;
 }
 
-void hdd_mon_tx_work_queue(struct work_struct *work)
+/**
+ * hdd_mon_tx_mgmt_pkt() - monitor mode tx packet api
+ * @adapter: Pointer to adapter
+ *
+ * Return: none
+ */
+void hdd_mon_tx_mgmt_pkt(hdd_adapter_t* adapter)
+{
+	vos_ssr_protect(__func__);
+	__hdd_mon_tx_mgmt_pkt(adapter);
+	vos_ssr_unprotect(__func__);
+}
+
+static void __hdd_mon_tx_work_queue(struct work_struct *work)
 {
    hdd_adapter_t* pAdapter = container_of(work, hdd_adapter_t, monTxWorkQueue);
-   hdd_mon_tx_mgmt_pkt(pAdapter);
+   __hdd_mon_tx_mgmt_pkt(pAdapter);
+}
+
+/**
+ * hdd_mon_tx_work_queue() - monitor mode tx work handler
+ * @work: Pointer to work
+ *
+ * Return: none
+ */
+void hdd_mon_tx_work_queue(struct work_struct *work)
+{
+	vos_ssr_protect(__func__);
+	__hdd_mon_tx_work_queue(work);
+	vos_ssr_unprotect(__func__);
 }
 
 int hdd_mon_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -1202,15 +1238,10 @@ VOS_STATUS hdd_tx_complete_cbk( v_VOID_t *vosContext,
    pHddCtx = (hdd_context_t *)vos_get_context( VOS_MODULE_ID_HDD, vosContext );
    //Get the Adapter context.
    pAdapter = hdd_get_adapter(pHddCtx,WLAN_HDD_INFRA_STATION);
-   if(pAdapter == NULL)
-   {
-      VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
-                "%s: HDD adapter context is Null", __func__);
-   }
+   if((pAdapter == NULL) || (WLAN_HDD_ADAPTER_MAGIC != pAdapter->magic))
+       hddLog(LOG1, FL("Invalid adapter %p"), pAdapter);
    else
-   {
       ++pAdapter->hdd_stats.hddTxRxStats.txCompleted;
-   }
 
    kfree_skb((struct sk_buff *)pOsPkt);
 
@@ -1280,10 +1311,8 @@ VOS_STATUS hdd_tx_fetch_packet_cbk( v_VOID_t *vosContext,
    }
 
    pAdapter = pHddCtx->sta_to_adapter[*pStaId];
-   if ((NULL == pAdapter) || (WLAN_HDD_ADAPTER_MAGIC != pAdapter->magic))
-   {
-      VOS_TRACE( VOS_MODULE_ID_HDD_DATA, VOS_TRACE_LEVEL_ERROR,
-              FL("pAdapter is NULL %u"), *pStaId);
+   if ((NULL == pAdapter) || (WLAN_HDD_ADAPTER_MAGIC != pAdapter->magic)) {
+      hddLog(LOGE, FL("Invalid adapter %p staId %u"), pAdapter, *pStaId);
       VOS_ASSERT(0);
       return VOS_STATUS_E_FAILURE;
    }
@@ -1608,10 +1637,8 @@ VOS_STATUS hdd_tx_low_resource_cbk( vos_pkt_t *pVosPacket,
    v_SIZE_t size = 0;
    hdd_adapter_t* pAdapter = (hdd_adapter_t *)userData;
 
-   if (NULL == pAdapter)
-   {
-      VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
-                "%s: HDD adapter context is Null", __func__);
+   if ((NULL == pAdapter) || (WLAN_HDD_ADAPTER_MAGIC != pAdapter->magic)) {
+      hddLog(LOGE, FL("Invalid adpater %p"), pAdapter);
       return VOS_STATUS_E_FAILURE;
    }
 
@@ -1684,6 +1711,7 @@ VOS_STATUS hdd_rx_packet_cbk(v_VOID_t *vosContext,
    hdd_context_t *pHddCtx = NULL;
    int rxstat;
    struct sk_buff *skb = NULL;
+   struct sk_buff *skb_next;
 #ifdef QCA_PKT_PROTO_TRACE
    v_U8_t proto_type;
 #endif /* QCA_PKT_PROTO_TRACE */
@@ -1704,86 +1732,99 @@ VOS_STATUS hdd_rx_packet_cbk(v_VOID_t *vosContext,
    }
 
    pAdapter = pHddCtx->sta_to_adapter[staId];
-   if( NULL == pAdapter )
-   {
+   if ((NULL == pAdapter) || (WLAN_HDD_ADAPTER_MAGIC != pAdapter->magic)) {
+      hddLog(LOGE, FL("invalid adapter %p for sta Id %d"), pAdapter, staId);
       return VOS_STATUS_E_FAILURE;
+   }
+
+   if (WLAN_HDD_ADAPTER_MAGIC != pAdapter->magic) {
+       VOS_TRACE(VOS_MODULE_ID_HDD_DATA, VOS_TRACE_LEVEL_FATAL,
+          "Magic cookie(%x) for adapter sanity verification is invalid",
+          pAdapter->magic);
+       return VOS_STATUS_E_FAILURE;
    }
    ++pAdapter->hdd_stats.hddTxRxStats.rxChains;
 
    // walk the chain until all are processed
    skb = (struct sk_buff *) rxBuf;
-
-   if (WLAN_HDD_ADAPTER_MAGIC != pAdapter->magic)
-   {
-       VOS_TRACE(VOS_MODULE_ID_HDD_DATA, VOS_TRACE_LEVEL_FATAL,
-       "Magic cookie(%x) for adapter sanity verification is invalid", pAdapter->magic);
-       return eHAL_STATUS_FAILURE;
-   }
-
    pHddStaCtx = WLAN_HDD_GET_STATION_CTX_PTR(pAdapter);
-   if ((pHddStaCtx->conn_info.proxyARPService) &&
-         cfg80211_is_gratuitous_arp_unsolicited_na(skb))
-   {
-         ++pAdapter->hdd_stats.hddTxRxStats.rxDropped;
-         VOS_TRACE(VOS_MODULE_ID_HDD_DATA, VOS_TRACE_LEVEL_INFO,
-            "%s: Dropping HS 2.0 Gratuitous ARP or Unsolicited NA", __func__);
-        kfree_skb(skb);
-        return VOS_STATUS_SUCCESS;
-   }
+   while (NULL != skb) {
+      skb_next = skb->next;
 
-#ifdef FEATURE_WLAN_TDLS
-#endif
+      if ((pHddStaCtx->conn_info.proxyARPService) &&
+         cfg80211_is_gratuitous_arp_unsolicited_na(skb)) {
+            ++pAdapter->hdd_stats.hddTxRxStats.rxDropped;
+            VOS_TRACE(VOS_MODULE_ID_HDD_DATA, VOS_TRACE_LEVEL_INFO,
+               "%s: Dropping HS 2.0 Gratuitous ARP or Unsolicited NA", __func__);
+            kfree_skb(skb);
+
+            skb = skb_next;
+            continue;
+      }
 
 #ifdef QCA_PKT_PROTO_TRACE
-   if ((pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_EAPOL) ||
-       (pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_DHCP))
-   {
-      proto_type = vos_pkt_get_proto_type(skb,
+      if ((pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_EAPOL) ||
+          (pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_DHCP)) {
+         proto_type = vos_pkt_get_proto_type(skb,
                         pHddCtx->cfg_ini->gEnableDebugLog, 0);
-      if (VOS_PKT_TRAC_TYPE_EAPOL & proto_type)
-      {
-         vos_pkt_trace_buf_update("ST:R:EPL");
+         if (VOS_PKT_TRAC_TYPE_EAPOL & proto_type)
+            vos_pkt_trace_buf_update("ST:R:EPL");
+         else if (VOS_PKT_TRAC_TYPE_DHCP & proto_type)
+            vos_pkt_trace_buf_update("ST:R:DHC");
       }
-      else if (VOS_PKT_TRAC_TYPE_DHCP & proto_type)
-      {
-         vos_pkt_trace_buf_update("ST:R:DHC");
-      }
-   }
 #endif /* QCA_PKT_PROTO_TRACE */
 
-   skb->dev = pAdapter->dev;
-   skb->protocol = eth_type_trans(skb, skb->dev);
+      skb->dev = pAdapter->dev;
+      skb->protocol = eth_type_trans(skb, skb->dev);
 
-   /* Check & drop mcast packets (for IPV6) as required */
-   if (drop_ip6_mcast(skb)) {
-         print_hex_dump_bytes("MAC Header", DUMP_PREFIX_NONE, skb_mac_header(skb), 16);
+      /* Check & drop mcast packets (for IPV6) as required */
+      if (drop_ip6_mcast(skb)) {
+         print_hex_dump_bytes("MAC Header",
+            DUMP_PREFIX_NONE, skb_mac_header(skb), 16);
          ++pAdapter->hdd_stats.hddTxRxStats.rxDropped;
          VOS_TRACE(VOS_MODULE_ID_HDD_DATA, VOS_TRACE_LEVEL_ERROR,
-            "%s: Dropping multicast to self NA", __func__);
-        kfree_skb(skb);
-        return VOS_STATUS_SUCCESS;
-   }
-   ++pAdapter->hdd_stats.hddTxRxStats.rxPackets;
-   ++pAdapter->stats.rx_packets;
-   pAdapter->stats.rx_bytes += skb->len;
+               "%s: Dropping multicast to self NA", __func__);
+         kfree_skb(skb);
+
+         skb = skb_next;
+         continue;
+      }
+
+      ++pAdapter->hdd_stats.hddTxRxStats.rxPackets;
+      ++pAdapter->stats.rx_packets;
+      pAdapter->stats.rx_bytes += skb->len;
+
+      /*
+       * If this is not a last packet on the chain
+       * Just put packet into backlog queue, not scheduling RX sirq
+       */
+      if (skb->next) {
+         rxstat = netif_rx(skb);
+      } else {
 #ifdef WLAN_FEATURE_HOLD_RX_WAKELOCK
-   vos_wake_lock_timeout_acquire(&pHddCtx->rx_wake_lock,
-                                 HDD_WAKE_LOCK_DURATION);
+         vos_wake_lock_timeout_acquire(&pHddCtx->rx_wake_lock,
+                                       HDD_WAKE_LOCK_DURATION);
 #endif
-   rxstat = netif_rx_ni(skb);
-   if (NET_RX_SUCCESS == rxstat)
-   {
-       ++pAdapter->hdd_stats.hddTxRxStats.rxDelivered;
-   }
-   else
-   {
-       ++pAdapter->hdd_stats.hddTxRxStats.rxRefused;
+         /*
+          * This is the last packet on the chain
+          * Scheduling rx sirq
+          */
+         rxstat = netif_rx_ni(skb);
+      }
+
+      if (NET_RX_SUCCESS == rxstat)
+         ++pAdapter->hdd_stats.hddTxRxStats.rxDelivered;
+      else
+         ++pAdapter->hdd_stats.hddTxRxStats.rxRefused;
+
+      skb = skb_next;
    }
 
    pAdapter->dev->last_rx = jiffies;
 
    return VOS_STATUS_SUCCESS;
 }
+
 
 /**============================================================================
   @brief hdd_tx_rx_pkt_cnt_stat_timer_handler() -
@@ -1795,41 +1836,3 @@ void hdd_tx_rx_pkt_cnt_stat_timer_handler( void *phddctx)
 {
 
 }
-
-#ifdef IPA_OFFLOAD
-/**============================================================================
-  @brief hdd_rx_mul_packet_cbk() - Receive callback registered with TL.
-  IPA integrated platform, TL Shim will give multiple RX frames with NETBUF
-  link. Linked frames should be un-link and send to NETDEV.
-
-  @param vosContext      : [in] pointer to VOS context
-  @param rx_buf_list     : [in] pointer to rx adf_nbuf linked list
-  @param staId           : [in] Station Id (Address 1 Index)
-
-  @return                : VOS_STATUS_E_FAILURE if any errors encountered,
-                         : VOS_STATUS_SUCCESS otherwise
-  ===========================================================================*/
-VOS_STATUS hdd_rx_mul_packet_cbk(v_VOID_t *vosContext,
-                                    adf_nbuf_t rx_buf_list, v_U8_t staId)
-{
-   adf_nbuf_t buf, next_buf;
-   VOS_STATUS status;
-
-   buf = rx_buf_list;
-   while(buf)
-   {
-      next_buf = adf_nbuf_queue_next(buf);
-      adf_nbuf_set_next(buf, NULL); /* Add NULL terminator */
-      status = hdd_rx_packet_cbk(vosContext, buf, staId);
-      if(!VOS_IS_STATUS_SUCCESS(status))
-      {
-         VOS_TRACE(VOS_MODULE_ID_HDD_DATA, VOS_TRACE_LEVEL_ERROR,
-                   "%s: RX fail, status %d", __func__, status);
-         return status;
-      }
-      buf = next_buf;
-   }
-   return VOS_STATUS_SUCCESS;
-}
-#endif /* IPA_OFFLOAD */
-

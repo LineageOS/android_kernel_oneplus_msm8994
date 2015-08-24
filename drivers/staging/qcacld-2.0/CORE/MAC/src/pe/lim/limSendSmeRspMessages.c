@@ -507,6 +507,21 @@ limSendSmeJoinReassocRsp(tpAniSirGlobal pMac, tANI_U16 msgType,
                 psessionEntry->assocRsp = NULL;
             }
 
+#ifdef WLAN_FEATURE_VOWIFI_11R
+            if(psessionEntry->ricData != NULL)
+            {
+                vos_mem_free( psessionEntry->ricData);
+                psessionEntry->ricData = NULL;
+            }
+#endif
+
+#ifdef FEATURE_WLAN_ESE
+            if(psessionEntry->tspecIes != NULL)
+            {
+                vos_mem_free(psessionEntry->tspecIes);
+                psessionEntry->tspecIes = NULL;
+            }
+#endif
         }
     }
 
@@ -1363,7 +1378,8 @@ limSendSmeDisassocNtf(tpAniSirGlobal pMac,
     switch (disassocTrigger)
     {
         case eLIM_PEER_ENTITY_DISASSOC:
-            return;
+            if (reasonCode != eSIR_SME_STA_NOT_ASSOCIATED)
+                return;
 
         case eLIM_HOST_DISASSOC:
             /**
@@ -3235,7 +3251,8 @@ limProcessBeaconTxSuccessInd(tpAniSirGlobal pMac, tANI_U16 msgType, void *event)
       {
          /* Done with CSA IE update, send response back to SME */
          psessionEntry->gLimChannelSwitch.switchCount = 0;
-         psessionEntry->gLimChannelSwitch.switchMode = 0;
+         if (pMac->sap.SapDfsInfo.disable_dfs_ch_switch == VOS_FALSE)
+             psessionEntry->gLimChannelSwitch.switchMode = 0;
          psessionEntry->dfsIncludeChanSwIe = VOS_FALSE;
          psessionEntry->dfsIncludeChanWrapperIe = VOS_FALSE;
 
