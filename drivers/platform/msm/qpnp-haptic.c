@@ -1030,6 +1030,44 @@ static ssize_t qpnp_hap_play_mode_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%s\n", str);
 }
 
+static ssize_t qpnp_hap_vmax_mv_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+	struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap,
+					 timed_dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", hap->vmax_mv);
+}
+
+static ssize_t qpnp_hap_vmax_mv_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+	struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap,
+					 timed_dev);
+	u32 data;
+	int rc;
+
+	if (sscanf(buf, "%d", &data) != 1)
+		return -EINVAL;
+
+	if (data < QPNP_HAP_VMAX_MIN_MV) {
+		pr_err("%s: mv %d not in range (%d - %d), using min.", __func__, data, QPNP_HAP_VMAX_MIN_MV, QPNP_HAP_VMAX_MAX_MV);
+		data = QPNP_HAP_VMAX_MIN_MV;
+	} else if (data > QPNP_HAP_VMAX_MAX_MV) {
+		pr_err("%s: mv %d not in range (%d - %d), using max.", __func__, data, QPNP_HAP_VMAX_MIN_MV, QPNP_HAP_VMAX_MAX_MV);
+		data = QPNP_HAP_VMAX_MAX_MV;
+	}
+
+	hap->vmax_mv = data;
+	rc = qpnp_hap_vmax_config(hap);
+	if (rc)
+		pr_info("qpnp: error while writing vibration control register\n");
+
+	return strnlen(buf, count);
+}
+
 /* sysfs attributes */
 static struct device_attribute qpnp_hap_attrs[] = {
 	__ATTR(wf_s0, (S_IRUGO | S_IWUSR | S_IWGRP),
@@ -1071,6 +1109,9 @@ static struct device_attribute qpnp_hap_attrs[] = {
 	__ATTR(dump_regs, (S_IRUGO | S_IWUSR | S_IWGRP),
 			qpnp_hap_dump_regs_show,
 			NULL),
+	__ATTR(vmax_mv, (S_IRUGO | S_IWUSR | S_IWGRP),
+			qpnp_hap_vmax_mv_show,
+			qpnp_hap_vmax_mv_store),
 };
 
 /* set api for haptics */
