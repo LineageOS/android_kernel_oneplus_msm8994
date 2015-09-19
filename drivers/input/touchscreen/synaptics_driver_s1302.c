@@ -55,6 +55,7 @@
 #include <linux/input/mt.h>
 
 #include "synaptics_s1302_redremote.h"
+#include "../misc/fpc1020.h"
 #include <linux/boot_mode.h>
 #include <linux/project_info.h>
 /*------------------------------------------------Global Define--------------------------------------------*/
@@ -668,7 +669,10 @@ static void int_key(struct synaptics_ts_data *ts )
 {
 
     int ret;
-	int button_key;
+    int button_key;
+
+    if (!nav_switch)
+        return;
 
     ret = synaptics_rmi4_i2c_write_byte(ts->client, 0xff, 0x02 );
     if (ret < 0) {

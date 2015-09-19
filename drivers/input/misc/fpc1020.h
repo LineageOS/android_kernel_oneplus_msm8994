@@ -52,5 +52,7 @@ typedef enum {
 	FPC1020_CHIP_1155X = 7
 } fpc1020_chip_t;
 
+extern unsigned int nav_switch;
+
 #endif
 
