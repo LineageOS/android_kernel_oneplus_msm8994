@@ -216,6 +216,8 @@ static int fpc1020_start_navigation(fpc1020_data_t *fpc1020);
 static int fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data);
 #endif
 
+unsigned int nav_switch = 1;
+
 /* -------------------------------------------------------------------- */
 /* External interface							*/
 /* -------------------------------------------------------------------- */
@@ -409,7 +411,6 @@ static int fpc1020_nav_switch_open(struct inode *inode, struct file *file)
 static ssize_t fpc1020_nav_switch_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
 	fpc1020_data_t *fpc1020 = (fpc1020_data_t*)PDE(file->f_path.dentry->d_inode)->data;
-	unsigned int nav_switch; 
 
 	if (!fpc1020) {
 		return -EFAULT;
