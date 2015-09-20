@@ -43,6 +43,10 @@ typedef enum {
 	MODE_MAX_NUM
 } tri_mode_t;
 
+#define KEY_MODE_MUTE 600
+#define KEY_MODE_DO_NOT_DISTURB 601
+#define KEY_MODE_NORMAL 602
+
 struct switch_dev_data {
 	//tri_mode_t last_type;
 	//tri_mode_t mode_type;
@@ -63,7 +67,7 @@ struct switch_dev_data {
 	struct timer_list s_timer;
 	struct pinctrl * key_pinctrl;
 	struct pinctrl_state * set_state;
-	
+	struct input_dev *input;
 };
 
 static struct switch_dev_data *switch_data;
@@ -77,22 +81,33 @@ static int set_gpio_by_pinctrl(void)
 
 static void switch_dev_work(struct work_struct *work)
 {
-	//printk("%s  gpio_get_value(%d)=%d\n",__func__,switch_data->key1_gpio,gpio_get_value(switch_data->key1_gpio));
-	//printk("%s  gpio_get_value(%d)=%d\n",__func__,switch_data->key2_gpio,gpio_get_value(switch_data->key2_gpio));
+    int mode;
+    int keyCode;
+    //printk("%s  gpio_get_value(%d)=%d\n",__func__,switch_data->key1_gpio,gpio_get_value(switch_data->key1_gpio));
+    //printk("%s  gpio_get_value(%d)=%d\n",__func__,switch_data->key2_gpio,gpio_get_value(switch_data->key2_gpio));
     mutex_lock(&sem); 
-	if(!gpio_get_value(switch_data->key2_gpio))    
-	{   
-	    switch_set_state(&switch_data->sdev, MODE_NORMAL);
-	}
-	else
-	{
-	    if(gpio_get_value(switch_data->key1_gpio))
-	        switch_set_state(&switch_data->sdev, MODE_DO_NOT_DISTURB);
-	    else
-	        switch_set_state(&switch_data->sdev, MODE_MUTE);
-	}
-	printk("%s ,tristate set to state(%d) \n",__func__,switch_data->sdev.state);
-	mutex_unlock(&sem); 
+    if(!gpio_get_value(switch_data->key2_gpio))
+    {
+        mode = MODE_NORMAL;
+        keyCode = KEY_MODE_NORMAL;
+    }
+    else if(gpio_get_value(switch_data->key1_gpio))
+    {
+        mode = MODE_DO_NOT_DISTURB;
+        keyCode = KEY_MODE_DO_NOT_DISTURB;
+    }
+    else
+    {
+        mode = MODE_MUTE;
+        keyCode = KEY_MODE_MUTE;
+    }
+    switch_set_state(&switch_data->sdev, mode);
+    input_report_key(switch_data->input, keyCode, 1);
+    input_sync(switch_data->input);
+    input_report_key(switch_data->input, keyCode, 0);
+    input_sync(switch_data->input);
+    printk("%s ,tristate set to state(%d) \n",__func__,switch_data->sdev.state);
+    mutex_unlock(&sem);
 }
 irqreturn_t switch_dev_interrupt(int irq, void *_dev)
 {
@@ -294,24 +309,23 @@ static int tristate_dev_probe(struct platform_device *pdev)
         //switch_data->last_type = MODE_UNKNOWN;
 
         //tristate_supply_init();
-/*
+
     switch_data->dev = dev;
 
     switch_data->input = input_allocate_device();
 
-	switch_data->input->name = pdev->name;
-	switch_data->input->phys = DRV_NAME"/input0";
-	switch_data->input->dev.parent = &pdev->dev;
-
-	switch_data->input->id.bustype = BUS_HOST;
-	switch_data->input->id.vendor = 0x0001;
-	switch_data->input->id.product = 0x0001;
-	switch_data->input->id.version = 0x0100;
-
+    switch_data->input->name = DRV_NAME;
+    switch_data->input->dev.parent = &pdev->dev;
+    set_bit(EV_KEY, switch_data->input->evbit);
+    set_bit(KEY_MODE_MUTE, switch_data->input->keybit);
+    set_bit(KEY_MODE_DO_NOT_DISTURB, switch_data->input->keybit);
+    set_bit(KEY_MODE_NORMAL, switch_data->input->keybit);
     input_set_drvdata(switch_data->input, switch_data);
-
-	__set_bit(EV_KEY, switch_data->input->evbit);
- */
+    error = input_register_device(switch_data->input);
+    if (error) {
+        dev_err(dev, "Failed to register input device\n");
+        goto err_input_device_register;
+    }
  
         //parse device tree node
 		error = switch_dev_get_devtree_pdata(dev);
@@ -428,21 +442,26 @@ err_set_gpio_input:
 	gpio_free(switch_data->key2_gpio);
 	gpio_free(switch_data->key1_gpio);
 err_switch_dev_register:
-	kfree(switch_data);	
+	kfree(switch_data);
+err_input_device_register:
+	input_unregister_device(switch_data->input);
+	input_free_device(switch_data->input);
 
 	return error;
 }
 
 static int tristate_dev_remove(struct platform_device *pdev)
 {
-printk("%s\n",__func__);
-	cancel_work_sync(&switch_data->work);
-	gpio_free(switch_data->key1_gpio);
-	gpio_free(switch_data->key2_gpio);
-	switch_dev_unregister(&switch_data->sdev);
-	kfree(switch_data);
+    printk("%s\n",__func__);
+    cancel_work_sync(&switch_data->work);
+    gpio_free(switch_data->key1_gpio);
+    gpio_free(switch_data->key2_gpio);
+    switch_dev_unregister(&switch_data->sdev);
+    input_unregister_device(switch_data->input);
+    input_free_device(switch_data->input);
+    kfree(switch_data);
 
-	return 0;
+    return 0;
 }
 
 static struct platform_driver tristate_dev_driver = {
