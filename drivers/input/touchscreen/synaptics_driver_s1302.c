@@ -59,6 +59,7 @@
 #include <linux/project_info.h>
 /*------------------------------------------------Global Define--------------------------------------------*/
 #define TP_TEST_ENABLE 1
+#define SYNAPTICS_NAME "synaptics"
 #define TPD_DEVICE "synaptics,s1302"
 #define LOG_TAG		"touchkey,s1302"
 
@@ -857,7 +858,7 @@ static int	synaptics_input_init(struct synaptics_ts_data *ts)
 		TPD_ERR("synaptics_ts_probe: Failed to allocate input device\n");
 		return ret;
 	}
-    ts->input_dev->name = TPD_DEVICE;;
+    ts->input_dev->name = SYNAPTICS_NAME;
     ts->input_dev->dev.parent = &ts->client->dev;
 	set_bit(EV_SYN, ts->input_dev->evbit);
 	set_bit(EV_KEY, ts->input_dev->evbit);
