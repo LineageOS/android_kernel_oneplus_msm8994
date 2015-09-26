@@ -74,6 +74,7 @@
 #define PAGESIZE 512
 #define TPD_USE_EINT
 
+#define SYNAPTICS_NAME "synaptics"
 #define TPD_DEVICE "synaptics,s3320"
 
 //#define SUPPORT_SLEEP_POWEROFF
@@ -2266,7 +2267,7 @@ static int	synaptics_input_init(struct synaptics_ts_data *ts)
 		TPD_ERR("synaptics_ts_probe: Failed to allocate input device\n");
 		return ret;
 	}
-    ts->input_dev->name = TPD_DEVICE;;
+    ts->input_dev->name = SYNAPTICS_NAME;
     ts->input_dev->dev.parent = &ts->client->dev;
 	set_bit(EV_SYN, ts->input_dev->evbit);
 	set_bit(EV_ABS, ts->input_dev->evbit);
