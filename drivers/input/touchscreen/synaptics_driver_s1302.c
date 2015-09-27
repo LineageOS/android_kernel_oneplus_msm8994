@@ -997,7 +997,7 @@ static ssize_t synaptics_s1302_key_reverse_write(struct file *file, const char _
 }
 static int synaptics_s1302_key_reverse_show(struct seq_file *seq, void *offset)
 {
-    seq_printf(seq, "s1302 menu key in %s\n",key_reverse?("right"):("left"));
+    seq_printf(seq, "%d\n",key_reverse);
     return 0 ;
 }
 static int synaptics_s1302_key_reverse_open(struct inode *inode, struct file *file)
