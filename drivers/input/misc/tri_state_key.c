@@ -14,6 +14,7 @@
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/gpio_keys.h>
+#include <linux/of_device.h>
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
 
@@ -43,9 +44,10 @@ typedef enum {
 	MODE_MAX_NUM
 } tri_mode_t;
 
-#define KEY_MODE_MUTE 600
-#define KEY_MODE_DO_NOT_DISTURB 601
-#define KEY_MODE_NORMAL 602
+static int current_mode = 0;
+static int keyCode_slider_top = 600;
+static int keyCode_slider_middle = 601;
+static int keyCode_slider_bottom = 602;
 
 struct switch_dev_data {
 	//tri_mode_t last_type;
@@ -79,35 +81,39 @@ static int set_gpio_by_pinctrl(void)
     return pinctrl_select_state(switch_data->key_pinctrl, switch_data->set_state);
 }
 
+static void send_input(int keyCode)
+{
+	input_report_key(switch_data->input, keyCode, 1);
+	input_sync(switch_data->input);
+	input_report_key(switch_data->input, keyCode, 0);
+	input_sync(switch_data->input);
+}
+
 static void switch_dev_work(struct work_struct *work)
 {
-    int mode;
-    int keyCode;
-    //printk("%s  gpio_get_value(%d)=%d\n",__func__,switch_data->key1_gpio,gpio_get_value(switch_data->key1_gpio));
-    //printk("%s  gpio_get_value(%d)=%d\n",__func__,switch_data->key2_gpio,gpio_get_value(switch_data->key2_gpio));
-    mutex_lock(&sem); 
-    if(!gpio_get_value(switch_data->key2_gpio))
-    {
-        mode = MODE_NORMAL;
-        keyCode = KEY_MODE_NORMAL;
-    }
-    else if(gpio_get_value(switch_data->key1_gpio))
-    {
-        mode = MODE_DO_NOT_DISTURB;
-        keyCode = KEY_MODE_DO_NOT_DISTURB;
-    }
-    else
-    {
-        mode = MODE_MUTE;
-        keyCode = KEY_MODE_MUTE;
-    }
-    switch_set_state(&switch_data->sdev, mode);
-    input_report_key(switch_data->input, keyCode, 1);
-    input_sync(switch_data->input);
-    input_report_key(switch_data->input, keyCode, 0);
-    input_sync(switch_data->input);
-    printk("%s ,tristate set to state(%d) \n",__func__,switch_data->sdev.state);
-    mutex_unlock(&sem);
+	int keyCode;
+	//printk("%s  gpio_get_value(%d)=%d\n",__func__,switch_data->key1_gpio,gpio_get_value(switch_data->key1_gpio));
+	//printk("%s  gpio_get_value(%d)=%d\n",__func__,switch_data->key2_gpio,gpio_get_value(switch_data->key2_gpio));
+	mutex_lock(&sem); 
+	if(!gpio_get_value(switch_data->key2_gpio))
+	{
+		current_mode = MODE_NORMAL;
+		keyCode = keyCode_slider_bottom;
+	}
+	else if(gpio_get_value(switch_data->key1_gpio))
+	{
+		current_mode = MODE_DO_NOT_DISTURB;
+		keyCode = keyCode_slider_middle;
+	}
+	else
+	{
+		current_mode = MODE_MUTE;
+		keyCode = keyCode_slider_top;
+	}
+	switch_set_state(&switch_data->sdev, current_mode);
+	send_input(keyCode);
+	printk("%s ,tristate set to state(%d) \n",__func__,switch_data->sdev.state);
+	mutex_unlock(&sem);
 }
 irqreturn_t switch_dev_interrupt(int irq, void *_dev)
 {
@@ -285,10 +291,93 @@ err:
 
 */
 
+static ssize_t keyCode_slider_top_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", keyCode_slider_top);
+}
+
+static ssize_t keyCode_slider_top_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	int data;
+
+	if (sscanf(buf, "%d", &data) != 1)
+		return -EINVAL;
+	if (data != 600 && data != 601 && data != 602)
+		return -EINVAL;
+
+	keyCode_slider_top = data;
+	if (current_mode == 1)
+		send_input(keyCode_slider_top);
+
+	return strnlen(buf, count);
+}
+
+static ssize_t keyCode_slider_middle_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", keyCode_slider_middle);
+}
+
+static ssize_t keyCode_slider_middle_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	int data;
+
+	if (sscanf(buf, "%d", &data) != 1)
+		return -EINVAL;
+	if (data != 600 && data != 601 && data != 602)
+		return -EINVAL;
+
+	keyCode_slider_middle = data;
+	if (current_mode == 2)
+		send_input(keyCode_slider_middle);
+
+	return strnlen(buf, count);
+}
+
+static ssize_t keyCode_slider_bottom_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", keyCode_slider_bottom);
+}
+
+static ssize_t keyCode_slider_bottom_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	int data;
+
+	if (sscanf(buf, "%d", &data) != 1)
+		return -EINVAL;
+	if (data != 600 && data != 601 && data != 602)
+		return -EINVAL;
+
+	keyCode_slider_bottom = data;
+	if (current_mode == 3)
+		send_input(keyCode_slider_bottom);
+
+	return strnlen(buf, count);
+}
+
+/* sysfs attributes */
+static struct device_attribute keyCode_attrs[] = {
+	__ATTR(keyCode_top, (S_IRUGO | S_IWUSR | S_IWGRP),
+			keyCode_slider_top_show,
+			keyCode_slider_top_store),
+	__ATTR(keyCode_middle, (S_IRUGO | S_IWUSR | S_IWGRP),
+			keyCode_slider_middle_show,
+			keyCode_slider_middle_store),
+	__ATTR(keyCode_bottom, (S_IRUGO | S_IWUSR | S_IWGRP),
+			keyCode_slider_bottom_show,
+			keyCode_slider_bottom_store),
+};
+
 static int tristate_dev_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-    
+
+	int i;
 	int error=0;
 
 	//void __iomem *cfg_reg;
@@ -310,22 +399,22 @@ static int tristate_dev_probe(struct platform_device *pdev)
 
         //tristate_supply_init();
 
-    switch_data->dev = dev;
+	switch_data->dev = dev;
 
-    switch_data->input = input_allocate_device();
+	switch_data->input = input_allocate_device();
 
-    switch_data->input->name = DRV_NAME;
-    switch_data->input->dev.parent = &pdev->dev;
-    set_bit(EV_KEY, switch_data->input->evbit);
-    set_bit(KEY_MODE_MUTE, switch_data->input->keybit);
-    set_bit(KEY_MODE_DO_NOT_DISTURB, switch_data->input->keybit);
-    set_bit(KEY_MODE_NORMAL, switch_data->input->keybit);
-    input_set_drvdata(switch_data->input, switch_data);
-    error = input_register_device(switch_data->input);
-    if (error) {
-        dev_err(dev, "Failed to register input device\n");
-        goto err_input_device_register;
-    }
+	switch_data->input->name = DRV_NAME;
+	switch_data->input->dev.parent = &pdev->dev;
+	set_bit(EV_KEY, switch_data->input->evbit);
+	set_bit(keyCode_slider_top, switch_data->input->keybit);
+	set_bit(keyCode_slider_middle, switch_data->input->keybit);
+	set_bit(keyCode_slider_bottom, switch_data->input->keybit);
+	input_set_drvdata(switch_data->input, switch_data);
+	error = input_register_device(switch_data->input);
+	if (error) {
+		dev_err(dev, "Failed to register input device\n");
+		goto err_input_device_register;
+	}
  
         //parse device tree node
 		error = switch_dev_get_devtree_pdata(dev);
@@ -431,6 +520,16 @@ static int tristate_dev_probe(struct platform_device *pdev)
 		 //set_gpio_by_pinctrl();   
         //report the first switch
         //switch_dev_work(&switch_data->work);
+
+	for (i = 0; i < ARRAY_SIZE(keyCode_attrs); i++) {
+		error = sysfs_create_file(&switch_data->dev->kobj,
+				&keyCode_attrs[i].attr);
+		if (error < 0) {
+			dev_err(dev, "sysfs creation failed\n");
+			goto err_sysfs;
+		}
+	}
+
         return 0;
 
 
@@ -446,6 +545,10 @@ err_switch_dev_register:
 err_input_device_register:
 	input_unregister_device(switch_data->input);
 	input_free_device(switch_data->input);
+err_sysfs:
+	for (i--; i >= 0; i--)
+		sysfs_remove_file(&switch_data->dev->kobj,
+				&keyCode_attrs[i].attr);
 
 	return error;
 }
