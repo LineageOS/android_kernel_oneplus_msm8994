@@ -49,7 +49,7 @@
  */
 
 extern void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
-		struct dsi_panel_cmds *pcmds);
+		struct dsi_panel_cmds *pcmds, u32 flags);
 
 static int parse_dsi_cmds(struct dsi_panel_cmds *pcmds, const uint8_t *cmd, int blen)
 {
@@ -269,7 +269,7 @@ static int mdss_livedisplay_update_locked(struct mdss_dsi_ctrl_pdata *ctrl_pdata
 	// Parse the command and send it
 	ret = parse_dsi_cmds(&dsi_cmds, (const uint8_t *)cmd_buf, len);
 	if (ret == 0) {
-		mdss_dsi_panel_cmds_send(ctrl_pdata, &dsi_cmds);
+		mdss_dsi_panel_cmds_send(ctrl_pdata, &dsi_cmds, CMD_REQ_COMMIT);
 	} else {
 		pr_err("%s: error parsing DSI command! ret=%d", __func__, ret);
 	}
