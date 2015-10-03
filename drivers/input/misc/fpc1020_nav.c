@@ -922,7 +922,7 @@ static int fpc1020_wait_finger_present_lpm(fpc1020_data_t *fpc1020)
                 input_report_key(fpc1020->input_dev,
 						FPC1020_KEY_FINGER_PRESS, 1);
 			    input_sync(fpc1020->input_dev);
-			}else{
+			}else if (enable_keys) {
 			    wake_lock_timeout(&fpc1020_wake_lock,5*HZ);
 			    input_report_key(fpc1020->input_dev,
 						KEY_HOME, 1);
@@ -962,7 +962,7 @@ static int fpc1020_wait_finger_present_lpm(fpc1020_data_t *fpc1020)
                             input_report_key(fpc1020->input_dev,
                                 FPC1020_KEY_FINGER_PRESS, 0);
                             input_sync(fpc1020->input_dev);
-                        }else{
+                        }else if (enable_keys) {
                             input_report_key(fpc1020->input_dev,
                                 KEY_HOME, 0);
                             input_sync(fpc1020->input_dev);
