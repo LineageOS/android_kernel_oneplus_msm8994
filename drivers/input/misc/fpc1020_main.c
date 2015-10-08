@@ -576,7 +576,6 @@ static ssize_t fpc1020_home_switch_store(struct device *dev, struct device_attri
 
 	//tmp = strsep((char **) &buf, "\n");
 	char *after;
-	unsigned long nav_switch = 0;
 
 	mutex_lock(&mLock);
 
@@ -585,7 +584,7 @@ static ssize_t fpc1020_home_switch_store(struct device *dev, struct device_attri
 
 	fpc1020 = dev_get_drvdata(dev);
 
-	dev_err(&fpc1020->spi->dev, "nav_switch change to %ld\n", nav_switch);
+	dev_err(&fpc1020->spi->dev, "nav_switch change to %d\n", nav_switch);
 
 	write_nav_switch(fpc1020);
 
@@ -598,7 +597,7 @@ static ssize_t fpc1020_home_switch_show(struct device *dev, struct device_attrib
 	fpc1020_data_t *fpc1020;
 	fpc1020 = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d", fpc1020->nav.enabled);
+	return sprintf(buf, "%d\n", fpc1020->nav.enabled);
 }
 //*/
 static struct device_attribute fpc1020_state_attr =
