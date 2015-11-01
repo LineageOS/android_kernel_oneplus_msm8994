@@ -61,6 +61,11 @@
 #define HTT_TX_EXT_TID_INVALID             31
 #define HTT_TX_EXT_TID_NONPAUSE            19
 
+#ifdef DEBUG_RX_RING_BUFFER
+#define HTT_RX_RING_BUFF_DBG_LIST          1024
+#endif
+
+#define HTT_HTC_PKT_MISCLIST_SIZE           6
 /**
  * @brief General specification of the tx frame contents
  *
@@ -191,6 +196,13 @@ struct ipa_uc_rx_ring_elem_t
 };
 #endif /* IPA_UC_OFFLOAD */
 
+#ifdef DEBUG_RX_RING_BUFFER
+struct rx_buf_debug {
+        uint32_t               paddr;
+        void *                 vaddr;
+        bool                   in_use;
+};
+#endif
 struct htt_pdev_t {
     ol_pdev_handle ctrl_pdev;
     ol_txrx_pdev_handle txrx_pdev;
@@ -345,6 +357,11 @@ struct htt_pdev_t {
     struct htt_ipa_uc_tx_resource_t ipa_uc_tx_rsc;
     struct htt_ipa_uc_rx_resource_t ipa_uc_rx_rsc;
 #endif /* IPA_UC_OFFLOAD */
+
+#ifdef DEBUG_RX_RING_BUFFER
+    struct rx_buf_debug *rx_buff_list;
+    int rx_buff_index;
+#endif
 };
 
 #endif /* _HTT_TYPES__H_ */

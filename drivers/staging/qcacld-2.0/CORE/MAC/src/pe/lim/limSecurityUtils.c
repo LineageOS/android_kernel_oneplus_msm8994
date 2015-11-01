@@ -443,6 +443,11 @@ limRestoreFromAuthState(tpAniSirGlobal pMac, tSirResultCodes resultCode, tANI_U1
     tSirMacAddr     currentBssId;
     tLimMlmAuthCnf  mlmAuthCnf;
 
+#ifdef FEATURE_WLAN_DIAG_SUPPORT
+    limDiagEventReport(pMac, WLAN_PE_DIAG_AUTH_COMP_EVENT, sessionEntry,
+                       resultCode, protStatusCode);
+#endif
+
     vos_mem_copy( (tANI_U8 *) &mlmAuthCnf.peerMacAddr,
                   (tANI_U8 *) &pMac->lim.gpLimMlmAuthReq->peerMacAddr,
                   sizeof(tSirMacAddr));
@@ -461,8 +466,13 @@ limRestoreFromAuthState(tpAniSirGlobal pMac, tSirResultCodes resultCode, tANI_U1
     sessionEntry->limMlmState = sessionEntry->limPrevMlmState;
 
     MTRACE(macTrace(pMac, TRACE_CODE_MLM_STATE, sessionEntry->peSessionId, sessionEntry->limMlmState));
-
-
+    /* Set the authAckStatus status flag as sucess as
+     * host have received the auth rsp and no longer auth
+     * retry is needed also cancel the auth rety timer
+     */
+    pMac->auth_ack_status = LIM_AUTH_ACK_RCD_SUCCESS;
+    /* 'Change' timer for future activations */
+    limDeactivateAndChangeTimer(pMac, eLIM_AUTH_RETRY_TIMER);
     // 'Change' timer for future activations
     limDeactivateAndChangeTimer(pMac, eLIM_AUTH_FAIL_TIMER);
 
@@ -1073,6 +1083,8 @@ void limSendSetStaKeyReq( tpAniSirGlobal pMac,
           else
           {
              limLog( pMac, LOGE, FL( "Wrong Key Index %d" ), defWEPIdx);
+             vos_mem_free (pSetStaKeyParams);
+             return;
           }
       }
       break;

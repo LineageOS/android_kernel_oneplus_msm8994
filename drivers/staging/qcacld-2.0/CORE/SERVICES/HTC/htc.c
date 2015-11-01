@@ -246,6 +246,7 @@ HTC_HANDLE HTCCreate(void *ol_sc, HTC_INIT_INFO *pInfo, adf_os_device_t osdev)
         htcCallbacks.txCompletionHandler = HTCTxCompletionHandler;
         htcCallbacks.txResourceAvailHandler = HTCTxResourceAvailHandler;
         htcCallbacks.fwEventHandler = HTCFwEventHandler;
+        htcCallbacks.txResumeAllHandler = HTCTxResumeAllHandler;
         target->hif_dev = hHIF;
 
         /* Get HIF default pipe for HTC message exchange */
@@ -267,6 +268,7 @@ void  HTCDestroy(HTC_HANDLE HTCHandle)
 {
     HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(HTCHandle);
     AR_DEBUG_PRINTF(ATH_DEBUG_TRC, ("+HTCDestroy ..  Destroying :0x%p \n",target));
+    HIFStop(HTCGetHifDevice(HTCHandle));
     HTCCleanup(target);
     AR_DEBUG_PRINTF(ATH_DEBUG_TRC, ("-HTCDestroy \n"));
 }
@@ -874,3 +876,20 @@ void HTCIpaGetCEResource(HTC_HANDLE htc_handle,
 }
 #endif /* IPA_UC_OFFLOAD */
 
+#ifdef FEATURE_RUNTIME_PM
+int htc_pm_runtime_get(HTC_HANDLE htc_handle)
+{
+	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(htc_handle);
+
+	AR_DEBUG_PRINTF(ATH_DEBUG_TRC, ("%s: %pS\n", __func__, (void *)_RET_IP_));
+	return hif_pm_runtime_get(target->hif_dev);
+}
+
+int htc_pm_runtime_put(HTC_HANDLE htc_handle)
+{
+	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(htc_handle);
+
+	AR_DEBUG_PRINTF(ATH_DEBUG_TRC, ("%s: %pS\n", __func__, (void *)_RET_IP_));
+	return hif_pm_runtime_put(target->hif_dev);
+}
+#endif

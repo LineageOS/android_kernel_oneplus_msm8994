@@ -1065,6 +1065,10 @@ limCleanupMlm(tpAniSirGlobal pMac)
         tx_timer_deactivate(&pMac->lim.limTimers.gLimPeriodicJoinProbeReqTimer);
         tx_timer_delete(&pMac->lim.limTimers.gLimPeriodicJoinProbeReqTimer);
 
+        // Deactivate and delete Auth Retry timer.
+        tx_timer_deactivate(&pMac->lim.limTimers.g_lim_periodic_auth_retry_timer);
+        tx_timer_delete(&pMac->lim.limTimers.g_lim_periodic_auth_retry_timer);
+
         // Deactivate and delete Association failure timer.
         tx_timer_deactivate(&pMac->lim.limTimers.gLimAssocFailureTimer);
         tx_timer_delete(&pMac->lim.limTimers.gLimAssocFailureTimer);
@@ -2060,7 +2064,8 @@ limDecideApProtection(tpAniSirGlobal pMac, tSirMacAddr peerMacAddr, tpUpdateBeac
           gfSupported = eHAL_CLEAR;
         }
         //Station joining is HT 20Mhz
-        if(eHT_CHANNEL_WIDTH_20MHZ == pStaDs->htSupportedChannelWidthSet)
+        if((eHT_CHANNEL_WIDTH_20MHZ == pStaDs->htSupportedChannelWidthSet)&&
+           (eHT_CHANNEL_WIDTH_20MHZ != psessionEntry->htSupportedChannelWidthSet))
         {
             protStaCacheType = eLIM_PROT_STA_CACHE_TYPE_HT20;
             limEnableHT20Protection(pMac, true, false, pBeaconParams, psessionEntry);
@@ -4103,12 +4108,15 @@ limEnable11gProtection(tpAniSirGlobal pMac, tANI_U8 enable,
                         {
                             limEnableHtRifsProtection(pMac, false, overlap, pBeaconParams,psessionEntry);
                             limEnableHtOBSSProtection(pMac,  false, overlap, pBeaconParams,psessionEntry);
-                            if(psessionEntry->gLimHt20Params.protectionEnabled){
-                                //Commenting out beacuse of CR 258588 WFA cert
-                                //psessionEntry->htOperMode = eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
-                                psessionEntry->htOperMode = eSIR_HT_OP_MODE_PURE;
-                            }
-                            else
+                            if (psessionEntry->gLimHt20Params.protectionEnabled) {
+                                if (eHT_CHANNEL_WIDTH_20MHZ ==
+                                      psessionEntry->htSupportedChannelWidthSet)
+                                    psessionEntry->htOperMode =
+                                        eSIR_HT_OP_MODE_PURE;
+                                else
+                                    psessionEntry->htOperMode =
+                                        eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
+                            } else
                                 psessionEntry->htOperMode = eSIR_HT_OP_MODE_PURE;
                         }
                     }
@@ -4138,9 +4146,13 @@ limEnable11gProtection(tpAniSirGlobal pMac, tANI_U8 enable,
                     }
                     else if(psessionEntry->gLimHt20Params.protectionEnabled)
                     {
-                        //Commenting because of CR 258588 WFA cert
-                        //psessionEntry->htOperMode = eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
-                        psessionEntry->htOperMode = eSIR_HT_OP_MODE_PURE;
+                        if(eHT_CHANNEL_WIDTH_20MHZ ==
+                              psessionEntry->htSupportedChannelWidthSet)
+                              psessionEntry->htOperMode =
+                                   eSIR_HT_OP_MODE_PURE;
+                        else
+                              psessionEntry->htOperMode =
+                                   eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
                         PELOGE(limLog(pMac, LOG1, FL("===> 11G Protection Disabled"));)
                         limEnableHtRifsProtection(pMac, false, overlap, pBeaconParams,psessionEntry);
                     }
@@ -4389,9 +4401,13 @@ limEnableHtProtectionFrom11g(tpAniSirGlobal pMac, tANI_U8 enable,
                         limEnableHtOBSSProtection(pMac,  false, overlap, pBeaconParams,psessionEntry);
 
                         if(psessionEntry->gLimHt20Params.protectionEnabled){
-                            //Commenting because of CR 258588 WFA cert
-                            //psessionEntry->htOperMode = eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
-                            psessionEntry->htOperMode = eSIR_HT_OP_MODE_PURE;
+                            if(eHT_CHANNEL_WIDTH_20MHZ ==
+                                 psessionEntry->htSupportedChannelWidthSet)
+                                 psessionEntry->htOperMode =
+                                      eSIR_HT_OP_MODE_PURE;
+                            else
+                                 psessionEntry->htOperMode =
+                                      eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
                         }
                         else
                             psessionEntry->htOperMode = eSIR_HT_OP_MODE_PURE;
@@ -4422,9 +4438,13 @@ limEnableHtProtectionFrom11g(tpAniSirGlobal pMac, tANI_U8 enable,
                     }
                     else if(psessionEntry->gLimHt20Params.protectionEnabled)
                     {
-                        //Commenting because of CR 258588 WFA cert
-                        //psessionEntry->htOperMode = eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
-                        psessionEntry->htOperMode = eSIR_HT_OP_MODE_PURE;
+                        if(eHT_CHANNEL_WIDTH_20MHZ ==
+                              psessionEntry->htSupportedChannelWidthSet)
+                              psessionEntry->htOperMode =
+                                   eSIR_HT_OP_MODE_PURE;
+                        else
+                              psessionEntry->htOperMode =
+                                   eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
                         limEnableHtRifsProtection(pMac, false, overlap, pBeaconParams,psessionEntry);
                     }
                     else
@@ -4437,7 +4457,7 @@ limEnableHtProtectionFrom11g(tpAniSirGlobal pMac, tANI_U8 enable,
             if(!psessionEntry->gLimOverlap11gParams.protectionEnabled &&
                   !psessionEntry->gLim11gParams.protectionEnabled)
             {
-                PELOG1(limLog(pMac, LOG1, FL("===> Protection from 11G Disabled"));)
+                limLog(pMac, LOG1, FL("===> Protection from 11G Disabled"));
                 pBeaconParams->llgCoexist = psessionEntry->beaconParams.llgCoexist = false;
                 pBeaconParams->paramChangeBitmap |= PARAM_llGCOEXIST_CHANGED;
             }
@@ -4663,9 +4683,10 @@ limEnableHT20Protection(tpAniSirGlobal pMac, tANI_U8 enable,
                psessionEntry->gLimHt20Params.protectionEnabled = true;
                 if(eSIR_HT_OP_MODE_PURE == psessionEntry->htOperMode)
                 {
-                    //Commenting because of CR 258588 WFA cert
-                    //psessionEntry->htOperMode = eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
-                    psessionEntry->htOperMode = eSIR_HT_OP_MODE_PURE;
+                    if (psessionEntry->htSupportedChannelWidthSet !=
+                            eHT_CHANNEL_WIDTH_20MHZ)
+                        psessionEntry->htOperMode =
+                            eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
                     limEnableHtRifsProtection(pMac, false, overlap, pBeaconParams,psessionEntry);
                     limEnableHtOBSSProtection(pMac,  false, overlap, pBeaconParams,psessionEntry);
                 }
@@ -4725,9 +4746,11 @@ limEnableHT20Protection(tpAniSirGlobal pMac, tANI_U8 enable,
                     {
                         if(psessionEntry->gLimHt20Params.protectionEnabled)
                         {
-                            //Commented beacuse of CR 258588 for WFA Cert
-                            //psessionEntry->htOperMode = eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
-                            psessionEntry->htOperMode = eSIR_HT_OP_MODE_PURE;
+                            if (psessionEntry->htSupportedChannelWidthSet ==
+                                    eHT_CHANNEL_WIDTH_20MHZ)
+                               psessionEntry->htOperMode = eSIR_HT_OP_MODE_PURE;
+                            else
+                               psessionEntry->htOperMode = eSIR_HT_OP_MODE_NO_LEGACY_20MHZ_HT;
                             limEnableHtRifsProtection(pMac, false, overlap, pBeaconParams,psessionEntry);
                             limEnableHtOBSSProtection(pMac,  false, overlap, pBeaconParams,psessionEntry);
                         }
@@ -8184,8 +8207,8 @@ bool lim_validate_received_frame_a1_addr(tpAniSirGlobal mac_ctx,
 		tSirMacAddr a1, tpPESession session)
 {
 	if (mac_ctx == NULL || session == NULL) {
-		limLog(mac_ctx, LOGE,
-			FL("NULL pointer"));
+		VOS_TRACE(VOS_MODULE_ID_PE, VOS_TRACE_LEVEL_INFO,
+				"mac or session context is null");
 		/* let main routine handle it */
 		return true;
 	}
@@ -8199,4 +8222,97 @@ bool lim_validate_received_frame_a1_addr(tpAniSirGlobal mac_ctx,
 		return false;
 	}
 	return true;
+}
+
+#ifdef WLAN_FEATURE_11AC
+void lim_set_vht_caps(tpAniSirGlobal p_mac, tpPESession p_session_entry,
+                     tANI_U8 *p_ie_start,tANI_U32 num_bytes)
+{
+    v_U8_t              *p_ie=NULL;
+    tDot11fIEVHTCaps     dot11_vht_cap;
+
+    PopulateDot11fVHTCaps(p_mac, p_session_entry, &dot11_vht_cap);
+    p_ie = limGetIEPtr(p_mac, p_ie_start, num_bytes, DOT11F_EID_VHTCAPS,
+                       ONE_BYTE);
+
+    if(p_ie) {
+        tSirMacVHTCapabilityInfo *vht_cap =
+                                  (tSirMacVHTCapabilityInfo *) &p_ie[2];
+        tSirVhtMcsInfo *vht_mcs = (tSirVhtMcsInfo *)
+                                  &p_ie[2 + sizeof(tSirMacVHTCapabilityInfo)];
+        union {
+            tANI_U16                       u_value;
+            tSirMacVHTRxSupDataRateInfo    vht_rx_supp_rate;
+            tSirMacVHTTxSupDataRateInfo    vht_tx_supp_rate;
+        } u_vht_data_rate_info;
+
+
+        vht_cap->maxMPDULen = dot11_vht_cap.maxMPDULen;
+        vht_cap->supportedChannelWidthSet =
+                               dot11_vht_cap.supportedChannelWidthSet;
+        vht_cap->ldpcCodingCap = dot11_vht_cap.ldpcCodingCap;
+        vht_cap->shortGI80MHz = dot11_vht_cap.shortGI80MHz;
+        vht_cap->shortGI160and80plus80MHz =
+                               dot11_vht_cap.shortGI160and80plus80MHz;
+        vht_cap->txSTBC = dot11_vht_cap.txSTBC;
+        vht_cap->rxSTBC = dot11_vht_cap.rxSTBC;
+        vht_cap->suBeamFormerCap = dot11_vht_cap.suBeamFormerCap;
+        vht_cap->suBeamformeeCap = dot11_vht_cap.suBeamformeeCap;
+        vht_cap->csnofBeamformerAntSup = dot11_vht_cap.csnofBeamformerAntSup;
+        vht_cap->numSoundingDim = dot11_vht_cap.numSoundingDim;
+        vht_cap->muBeamformerCap = dot11_vht_cap.muBeamformerCap;
+        vht_cap->muBeamformeeCap = dot11_vht_cap.muBeamformeeCap;
+        vht_cap->vhtTXOPPS = dot11_vht_cap.vhtTXOPPS;
+        vht_cap->htcVHTCap = dot11_vht_cap.htcVHTCap;
+        vht_cap->maxAMPDULenExp = dot11_vht_cap.maxAMPDULenExp;
+        vht_cap->vhtLinkAdaptCap = dot11_vht_cap.vhtLinkAdaptCap;
+        vht_cap->rxAntPattern = dot11_vht_cap.rxAntPattern;
+        vht_cap->txAntPattern = dot11_vht_cap.txAntPattern;
+        vht_cap->reserved1 = dot11_vht_cap.reserved1;
+
+        /* Populate VHT MCS Information */
+        vht_mcs->rxMcsMap = dot11_vht_cap.rxMCSMap;
+        u_vht_data_rate_info.vht_rx_supp_rate.rxSupDataRate =
+                            dot11_vht_cap.rxHighSupDataRate;
+        u_vht_data_rate_info.vht_rx_supp_rate.reserved =
+                            dot11_vht_cap.reserved2;
+        vht_mcs->rxHighest = u_vht_data_rate_info.u_value;
+
+        vht_mcs->txMcsMap = dot11_vht_cap.txMCSMap;
+        u_vht_data_rate_info.vht_tx_supp_rate.txSupDataRate =
+                            dot11_vht_cap.txSupDataRate;
+        u_vht_data_rate_info.vht_tx_supp_rate.reserved =
+                            dot11_vht_cap.reserved3;
+        vht_mcs->txHighest = u_vht_data_rate_info.u_value;
+    }
+}
+#endif /* WLAN_FEATURE_11AC */
+
+/**
+ * lim_set_stads_rtt_cap() - update station node RTT capability
+ * @sta_ds: Station hash node
+ * @ext_cap: Pointer to extended capability
+ *
+ * This funciton update hash node's RTT capability based on received
+ * Extended capability IE.
+ *
+ * Return: None
+ */
+void lim_set_stads_rtt_cap(tpDphHashNode sta_ds, struct s_ext_cap *ext_cap)
+{
+	sta_ds->timingMeasCap = 0;
+	sta_ds->timingMeasCap |= (ext_cap->timingMeas)?
+				  RTT_TIMING_MEAS_CAPABILITY :
+				  RTT_INVALID;
+	sta_ds->timingMeasCap |= (ext_cap->fine_time_meas_initiator)?
+				  RTT_FINE_TIME_MEAS_INITIATOR_CAPABILITY :
+				  RTT_INVALID;
+	sta_ds->timingMeasCap |= (ext_cap->fine_time_meas_responder)?
+				  RTT_FINE_TIME_MEAS_RESPONDER_CAPABILITY :
+				  RTT_INVALID;
+
+	PELOG1(limLog(pMac, LOG1,
+	       FL("ExtCap present, timingMeas: %d Initiator: %d Responder: %d"),
+	       ext_cap->timingMeas, ext_cap->fine_time_meas_initiator,
+	       ext_cap->fine_time_meas_responder);)
 }

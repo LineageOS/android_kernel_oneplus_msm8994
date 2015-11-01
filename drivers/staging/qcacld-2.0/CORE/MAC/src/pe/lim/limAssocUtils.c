@@ -1110,7 +1110,6 @@ limDecideApProtectionOnDelete(tpAniSirGlobal pMac,
                                     pStaDs->staAddr, sizeof(tSirMacAddr)))
                             {
                                 psessionEntry->gLim11aParams.numSta--;
-                                psessionEntry->protStaCache[i].active = false;
                                 break;
                             }
                         }
@@ -1217,7 +1216,6 @@ limDecideApProtectionOnDelete(tpAniSirGlobal pMac,
                                 pStaDs->staAddr, sizeof(tSirMacAddr)))
                         {
                             psessionEntry->gLimNonGfParams.numSta--;
-                            psessionEntry->protStaCache[i].active = false;
                             break;
                         }
                     }
@@ -1253,7 +1251,6 @@ limDecideApProtectionOnDelete(tpAniSirGlobal pMac,
                                 pStaDs->staAddr, sizeof(tSirMacAddr)))
                         {
                             psessionEntry->gLimLsigTxopParams.numSta--;
-                            psessionEntry->protStaCache[i].active = false;
                             break;
                         }
                     }
@@ -2973,7 +2970,7 @@ limAddStaSelf(tpAniSirGlobal pMac,tANI_U16 staIdx, tANI_U8 updateSta, tpPESessio
          * TQ STA will do Greenfield only with TQ AP, for
          * everybody else it will be turned off.
         */
-        if( (psessionEntry->pLimJoinReq != NULL))
+        if( (psessionEntry->pLimJoinReq != NULL) && (!psessionEntry->pLimJoinReq->bssDescription.aniIndicator))
         {
             limLog( pMac, LOGE, FL(" Turning off Greenfield, when adding self entry"));
             pAddStaParams->greenFieldCapable = WNI_CFG_GREENFIELD_CAPABILITY_DISABLE;

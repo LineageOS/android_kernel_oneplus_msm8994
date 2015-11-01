@@ -291,6 +291,9 @@ static void csrSetDefaultScanTiming( tpAniSirGlobal pMac, tSirScanType scanType,
     //This portion of the code executed if multi-session not supported
     //(WLAN_AP_STA_CONCURRENCY not defined) or no multi-session.
     //Use the "regular" (non-concurrency) default scan timing.
+    ccmCfgSetInt(pMac->hHdd,WNI_CFG_PASSIVE_MAXIMUM_CHANNEL_TIME,
+                     pMac->roam.configParam.nPassiveMaxChnTime,
+                     NULL,eANI_BOOLEAN_FALSE);
     if(pScanRequest->scanType == eSIR_ACTIVE_SCAN)
     {
         pScanRequest->maxChnTime = pMac->roam.configParam.nActiveMaxChnTime;
@@ -530,47 +533,65 @@ eHalStatus csrQueueScanRequest(tpAniSirGlobal pMac, tANI_U8 sessionId,
 }
 #endif
 
-/* ---------------------------------------------------------------------------
-    \fn csrScan2GOnyRequest
-    \brief This function will update the scan request with only
-           2.4GHz valid channel list.
-    \param pMac
-    \param pScanCmd
-    \param pScanRequest
-    \return None
-  -------------------------------------------------------------------------------*/
-static void csrScan2GOnyRequest(tpAniSirGlobal pMac,tSmeCmd *pScanCmd,
-                                tCsrScanRequest *pScanRequest)
+/**
+ * csrScan2GOnyRequest() - This function will update the scan request with
+ * only 2.4GHz valid channel list.
+ * @mac_ctx:      Pointer to Global MAC structure
+ * @scan_cmd      scan cmd
+ * @scan_req      scan req
+ *
+ * This function will update the scan request with  only 2.4GHz valid channel
+ * list.
+ *
+ * @Return: status of operation
+ */
+static eHalStatus csrScan2GOnyRequest(tpAniSirGlobal mac_ctx,
+                                      tSmeCmd *scan_cmd,
+                                      tCsrScanRequest *scan_req)
 {
-    tANI_U8 index, channelId, channelListSize = 0;
-    tANI_U8 channelList2G[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
-    static tANI_U8 validchannelList[CSR_MAX_2_4_GHZ_SUPPORTED_CHANNELS] = {0};
+    uint8_t idx, lst_sz = 0;
 
-    VOS_ASSERT(pScanCmd && pScanRequest);
+    VOS_ASSERT(scan_cmd && scan_req);
     /* To silence the KW tool null check is added */
-    if((pScanCmd == NULL) || (pScanRequest == NULL))
-    {
-        smsLog( pMac, LOGE, FL(" pScanCmd or pScanRequest is NULL "));
-        return;
+    if ((scan_cmd == NULL) || (scan_req == NULL)) {
+        smsLog(mac_ctx, LOGE, FL(" Scan Cmd or Scan Request is NULL "));
+        return eHAL_STATUS_INVALID_PARAMETER;
     }
 
-    if ((pScanCmd->u.scanCmd.scanID != FIRST_SCAN_ID) ||
-       (eCSR_SCAN_REQUEST_FULL_SCAN != pScanRequest->requestType))
-           return;
+    if (eCSR_SCAN_REQUEST_FULL_SCAN != scan_req->requestType)
+        return eHAL_STATUS_SUCCESS;
 
-    smsLog( pMac, LOG1, FL("Scanning only 2G Channels during first scan"));
-    /* Construct valid Supported 2.4 GHz Channel List */
-    for( index = 0; index < ARRAY_SIZE(channelList2G); index++ )
-    {
-        channelId = channelList2G[index];
-        if ( csrIsSupportedChannel( pMac, channelId ) )
-        {
-            validchannelList[channelListSize++] = channelId;
+    smsLog(mac_ctx, LOG1,
+           FL("Scanning only 2G Channels during first scan"));
+
+    /* Contsruct valid Supported 2.4 GHz Channel List */
+    if (NULL == scan_req->ChannelInfo.ChannelList) {
+        scan_req->ChannelInfo.ChannelList =
+            vos_mem_malloc(NUM_2_4GHZ_CHANNELS);
+        if (NULL == scan_req->ChannelInfo.ChannelList) {
+            smsLog(mac_ctx, LOGE, FL("Memory allocation failed."));
+            return eHAL_STATUS_FAILED_ALLOC;
+        }
+        for (idx = 1; idx <= NUM_2_4GHZ_CHANNELS; idx++) {
+            if (csrIsSupportedChannel(mac_ctx, idx)) {
+                scan_req->ChannelInfo.ChannelList[lst_sz] = idx;
+                lst_sz++;
+            }
         }
     }
-
-    pScanRequest->ChannelInfo.numOfChannels = channelListSize;
-    pScanRequest->ChannelInfo.ChannelList = validchannelList;
+    else {
+        for (idx = 0; idx < scan_req->ChannelInfo.numOfChannels; idx++) {
+            if (scan_req->ChannelInfo.ChannelList[idx] <= VOS_24_GHZ_CHANNEL_14
+                && csrIsSupportedChannel(mac_ctx,
+                       scan_req->ChannelInfo.ChannelList[idx])) {
+                scan_req->ChannelInfo.ChannelList[lst_sz] =
+                        scan_req->ChannelInfo.ChannelList[idx];
+                lst_sz++;
+            }
+        }
+    }
+    scan_req->ChannelInfo.numOfChannels = lst_sz;
+    return eHAL_STATUS_SUCCESS;
 }
 
 eHalStatus csrScanRequest(tpAniSirGlobal pMac, tANI_U16 sessionId,
@@ -725,7 +746,7 @@ eHalStatus csrScanRequest(tpAniSirGlobal pMac, tANI_U16 sessionId,
                 // If it is the first scan request from HDD, CSR checks if it is for 11d.
                 // If it is not, CSR will save the scan request in the pending cmd queue
                 // & issue an 11d scan request to PE.
-                if (((FIRST_SCAN_ID == pScanCmd->u.scanCmd.scanID)
+                if (((false == pMac->first_scan_done)
                    && (eCSR_SCAN_REQUEST_11D_SCAN != pScanRequest->requestType))
 #ifdef SOFTAP_CHANNEL_RANGE
                    && (eCSR_SCAN_SOFTAP_CHANNEL_RANGE != pScanRequest->requestType)
@@ -808,6 +829,9 @@ eHalStatus csrScanRequest(tpAniSirGlobal pMac, tANI_U16 sessionId,
 
                         if (HAL_STATUS_SUCCESS(status))
                         {
+                            pMac->scan.scanProfile.numOfChannels =
+                                p11dScanCmd->u.scanCmd.u.scanRequest.
+                                                     ChannelInfo.numOfChannels;
                             //Start process the command
 #ifdef WLAN_AP_STA_CONCURRENCY
                             if (!pMac->fScanOffload)
@@ -843,10 +867,16 @@ eHalStatus csrScanRequest(tpAniSirGlobal pMac, tANI_U16 sessionId,
                 //Scan only 2G Channels if set in ini file
                 //This is mainly to reduce the First Scan duration
                 //Once we turn on Wifi
-                if(pMac->scan.fFirstScanOnly2GChnl)
-                {
-                    csrScan2GOnyRequest(pMac, pScanCmd, pScanRequest);
+                if(pMac->scan.fFirstScanOnly2GChnl
+                   && false == pMac->first_scan_done) {
+                    status = csrScan2GOnyRequest(pMac, pScanCmd, pScanRequest);
+                    if (!HAL_STATUS_SUCCESS(status)) {
+                        smsLog(pMac, LOGE, FL("csrScan2GOnyRequest failed."));
+                        break;
+                    }
                 }
+
+                pMac->first_scan_done = true;
 
                 if (pMac->roam.configParam.nInitialDwellTime)
                 {
@@ -1947,23 +1977,115 @@ eHalStatus csrScanResultPurge(tpAniSirGlobal pMac, tScanResultHandle hScanList)
     return (status);
 }
 
-
-static tANI_U32 csrGetBssPreferValue(tpAniSirGlobal pMac, int rssi)
+/**
+ * csr_get_altered_rssi() - Artificially increase/decrease RSSI
+ * @mac_ctx:         Global MAC Context pointer.
+ * @rssi:            Actual RSSI of the AP.
+ * @channel_id:      Channel on which the AP is parked.
+ * @bssid:           BSSID of the AP to connect to.
+ *
+ * This routine will apply the boost and penalty parameters
+ * if the channel_id is of 5G band and it will also apply
+ * the preferred bssid score if there is a match between
+ * the bssid and the global preferred bssid list.
+ *
+ * Return:          The modified RSSI Value
+ */
+static int csr_get_altered_rssi(tpAniSirGlobal mac_ctx, int rssi,
+		uint8_t channel_id, tCsrBssid *bssid)
 {
-    tANI_U32 ret = 0;
-    int i = CSR_NUM_RSSI_CAT - 1;
+	int modified_rssi;
+	int boost_factor;
+	int penalty_factor;
+	int i;
+	struct roam_ext_params *roam_params;
+	tCsrBssid local_bssid;
 
-    while(i >= 0)
-    {
-        if(rssi >= pMac->roam.configParam.RSSICat[i])
-        {
-            ret = pMac->roam.configParam.BssPreferValue[i];
-            break;
-        }
-        i--;
-    };
+	modified_rssi = rssi;
+	vos_mem_set(&local_bssid, 0, VOS_MAC_ADDR_SIZE);
+	if (bssid)
+		vos_mem_copy(&local_bssid, bssid, VOS_MAC_ADDR_SIZE);
+	roam_params = &mac_ctx->roam.configParam.roam_params;
+	/*
+	 * If the 5G pref feature is enabled, apply the roaming
+	 * parameters to boost or penalize the rssi.
+	 * Boost Factor = boost_factor * (Actual RSSI - boost Threshold)
+	 * Penalty Factor = penalty factor * (penalty threshold - Actual RSSI)
+	 */
+	if (CSR_IS_SELECT_5G_PREFERRED(mac_ctx) &&
+		CSR_IS_CHANNEL_5GHZ(channel_id)) {
+		if (rssi > roam_params->raise_rssi_thresh_5g) {
+			/* Check and boost the threshold*/
+			boost_factor = roam_params->raise_factor_5g *
+				(rssi - roam_params->raise_rssi_thresh_5g);
+			/* Check and penalize the threshold */
+			modified_rssi += CSR_MIN(roam_params->max_raise_rssi_5g,
+				boost_factor);
+		} else if(rssi < roam_params->drop_rssi_thresh_5g) {
+			penalty_factor = roam_params->drop_factor_5g *
+				(roam_params->drop_rssi_thresh_5g - rssi);
+			modified_rssi -= CSR_MAX(roam_params->max_drop_rssi_5g,
+				penalty_factor);
+		}
+		VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_DEBUG,
+			FL("5G BSSID("MAC_ADDRESS_STR") AR:%d, MR:%d, ch=%d"),
+			MAC_ADDR_ARRAY(local_bssid), rssi,
+			modified_rssi, channel_id);
+	}
+	/*
+	 * Check if there are preferred bssid and then apply the
+	 * preferred score
+	 */
+	if (roam_params->num_bssid_favored) {
+		for (i=0; i<roam_params->num_bssid_favored; i++) {
+			if (!csrIsMacAddressEqual(mac_ctx,
+				&roam_params->bssid_favored[i], bssid))
+				continue;
+			modified_rssi += roam_params->bssid_favored_factor[i];
+			VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_DEBUG,
+			    FL("Pref: ("MAC_ADDRESS_STR") AR:%d, MR:%d, ch=%d"),
+			    MAC_ADDR_ARRAY(local_bssid), rssi, modified_rssi,
+			    channel_id);
+		}
+	}
+	return modified_rssi;
+}
 
-    return (ret);
+/**
+ * csrGetBssPreferValue() - Get BSS Preference Value
+ * @pMac:         Global MAC Context pointer.
+ * @rssi:         Actual RSSI of the AP.
+ * @bssid:        BSSID of the AP to connect to.
+ * @channel_id:   Channel on which the AP is parked.
+ *
+ *
+ * This routine helps in determining the preference value
+ * of a particular BSS in the scan result which is further
+ * used in the sorting logic of the final candidate AP's.
+ *
+ * Return:          The preference Value for a BSS.
+ */
+static tANI_U32 csrGetBssPreferValue(tpAniSirGlobal pMac, int rssi,
+		tCsrBssid *bssid, int channel_id)
+{
+	tANI_U32 ret = 0;
+	int i, modified_rssi;
+
+	/*
+	 * The RSSI does not get modified in case the 5G
+	 * preference or preferred BSSID is not applicable
+	 */
+	modified_rssi = csr_get_altered_rssi(pMac, rssi, channel_id, bssid);
+
+	i = CSR_NUM_RSSI_CAT - 1;
+	while(i >= 0) {
+		if(modified_rssi >= pMac->roam.configParam.RSSICat[i]) {
+			ret = pMac->roam.configParam.BssPreferValue[i];
+			break;
+		}
+		i--;
+	};
+	return (ret);
 }
 
 
@@ -1972,7 +2094,7 @@ static tANI_U32 csrGetBssCapValue(tpAniSirGlobal pMac, tSirBssDescription *pBssD
 {
     tANI_U32 ret = CSR_BSS_CAP_VALUE_NONE;
 #if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_ESE) || defined(FEATURE_WLAN_LFR)
-    if(CSR_IS_ROAM_PREFER_5GHZ(pMac))
+    if(CSR_IS_ROAM_PREFER_5GHZ(pMac) || CSR_IS_SELECT_5G_PREFERRED(pMac))
     {
         if((pBssDesc) && CSR_IS_CHANNEL_5GHZ(pBssDesc->channelId))
         {
@@ -1984,10 +2106,10 @@ static tANI_U32 csrGetBssCapValue(tpAniSirGlobal pMac, tSirBssDescription *pBssD
     if (pIes && !CSR_IS_SELECT_5GHZ_MARGIN(pMac))
     {
         //We only care about 11N capability
-        if(pIes->HTCaps.present)
-        {
+        if (pIes->VHTCaps.present)
+            ret += CSR_BSS_CAP_VALUE_VHT;
+        else if (pIes->HTCaps.present)
             ret += CSR_BSS_CAP_VALUE_HT;
-        }
         if(CSR_IS_QOS_BSS(pIes))
         {
             ret += CSR_BSS_CAP_VALUE_WMM;
@@ -2002,33 +2124,69 @@ static tANI_U32 csrGetBssCapValue(tpAniSirGlobal pMac, tSirBssDescription *pBssD
     return (ret);
 }
 
-
-//To check whther pBss1 is better than pBss2
-static tANI_BOOLEAN csrIsBetterBss(tCsrScanResult *pBss1, tCsrScanResult *pBss2)
+/**
+ * csr_is_better_rssi() - Is bss1 better than bss2
+ * @mac_ctx:             Global MAC Context pointer.
+ * @bss1:                Pointer to the first BSS.
+ * @bss2:                Pointer to the second BSS.
+ *
+ *
+ * This routine helps in determining the preference value
+ * of a particular BSS in the scan result which is further
+ * used in the sorting logic of the final candidate AP's.
+ *
+ * Return:          true, if bss1 is better than bss2
+ *                  false, if bss2 is better than bss1.
+ */
+static bool csr_is_better_rssi(tpAniSirGlobal mac_ctx,
+		tCsrScanResult *bss1, tCsrScanResult *bss2)
 {
-    tANI_BOOLEAN ret;
+	bool ret;
+	int rssi1, rssi2;
 
-    if(CSR_IS_BETTER_PREFER_VALUE(pBss1->preferValue, pBss2->preferValue))
-    {
-        ret = eANI_BOOLEAN_TRUE;
-    }
-    else if(CSR_IS_EQUAL_PREFER_VALUE(pBss1->preferValue, pBss2->preferValue))
-    {
-        if(CSR_IS_BETTER_CAP_VALUE(pBss1->capValue, pBss2->capValue))
-        {
-            ret = eANI_BOOLEAN_TRUE;
-        }
-        else
-        {
-            ret = eANI_BOOLEAN_FALSE;
-        }
-    }
-    else
-    {
-        ret = eANI_BOOLEAN_FALSE;
-    }
+	rssi1 = bss1->Result.BssDescriptor.rssi;
+	rssi2 = bss2->Result.BssDescriptor.rssi;
+	/*
+	 * Apply the boost and penlty logic and check
+	 * which is the best RSSI
+	 */
+	rssi1 = csr_get_altered_rssi(mac_ctx, rssi1,
+		bss1->Result.BssDescriptor.channelId,
+		&bss1->Result.BssDescriptor.bssId);
+	rssi2 = csr_get_altered_rssi(mac_ctx, rssi2,
+		bss2->Result.BssDescriptor.channelId,
+		&bss2->Result.BssDescriptor.bssId);
+	if (CSR_IS_BETTER_RSSI(rssi1, rssi2))
+		ret = true;
+	else
+		ret = false;
+	return ret;
+}
+/* To check whether pBss1 is better than pBss2 */
+static tANI_BOOLEAN csrIsBetterBss(tpAniSirGlobal mac_ctx,
+		tCsrScanResult *pBss1, tCsrScanResult *pBss2)
+{
+	tANI_BOOLEAN ret;
 
-    return (ret);
+	if(CSR_IS_BETTER_PREFER_VALUE(pBss1->preferValue, pBss2->preferValue))
+		ret = eANI_BOOLEAN_TRUE;
+	else if(CSR_IS_EQUAL_PREFER_VALUE
+		(pBss1->preferValue, pBss2->preferValue)) {
+		if(CSR_IS_BETTER_CAP_VALUE(pBss1->capValue, pBss2->capValue))
+			ret = eANI_BOOLEAN_TRUE;
+		else if (CSR_IS_EQUAL_CAP_VALUE
+			(pBss1->capValue, pBss2->capValue)) {
+			if (csr_is_better_rssi(mac_ctx, pBss1, pBss2))
+				ret = eANI_BOOLEAN_TRUE;
+			else
+				ret = eANI_BOOLEAN_FALSE;
+		}
+		else
+			ret = eANI_BOOLEAN_FALSE;
+	}
+	else
+		ret = eANI_BOOLEAN_FALSE;
+	return (ret);
 }
 
 
@@ -2073,9 +2231,10 @@ static void csrScanAddResult(tpAniSirGlobal pMac, tCsrScanResult *pResult,
     tpCsrNeighborRoamControlInfo pNeighborRoamInfo =
                                         &pMac->roam.neighborRoamInfo[sessionId];
 #endif
-
-    pResult->preferValue =
-            csrGetBssPreferValue(pMac, (int)pResult->Result.BssDescriptor.rssi);
+    tCsrBssid *bssid = &pResult->Result.BssDescriptor.bssId;
+    uint8_t channel_id = pResult->Result.BssDescriptor.channelId;
+    pResult->preferValue = csrGetBssPreferValue(pMac,
+        (int)pResult->Result.BssDescriptor.rssi, bssid, channel_id);
     pResult->capValue =
             csrGetBssCapValue(pMac, &pResult->Result.BssDescriptor, pIes);
     csrLLInsertTail( &pMac->scan.scanResultList, &pResult->Link, LL_ACCESS_LOCK );
@@ -2105,27 +2264,37 @@ eHalStatus csrScanGetResult(tpAniSirGlobal pMac, tCsrScanResultFilter *pFilter, 
     tDot11fBeaconIEs *pIes, *pNewIes;
     tANI_BOOLEAN fMatch;
     tANI_U16 i = 0;
+    struct roam_ext_params *roam_params = NULL;
 
     if(phResult)
     {
         *phResult = CSR_INVALID_SCANRESULT_HANDLE;
     }
 
-    if (pMac->roam.configParam.nSelect5GHzMargin)
+    if (pMac->roam.configParam.nSelect5GHzMargin ||
+       CSR_IS_SELECT_5G_PREFERRED(pMac))
     {
         pMac->scan.inScanResultBestAPRssi = -128;
+        roam_params = &pMac->roam.configParam.roam_params;
 #ifdef WLAN_DEBUG_ROAM_OFFLOAD
-        VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_DEBUG,
+        VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR,
                   FL("nSelect5GHzMargin"));
 #endif
         csrLLLock(&pMac->scan.scanResultList);
-
+  /* For 5G preference feature, there is no
+   * need to check the filter match and also re-program the
+   * RSSI bucket categories, since we use the RSSI values
+   * while setting the preference value for the BSS.
+   * There is no need to check the match for roaming since
+   * it is already done.*/
+  if(!CSR_IS_SELECT_5G_PREFERRED(pMac)) {
         /* Find out the best AP Rssi going thru the scan results */
         pEntry = csrLLPeekHead(&pMac->scan.scanResultList, LL_ACCESS_NOLOCK);
         while ( NULL != pEntry)
         {
             pBssDesc = GET_BASE_ADDR( pEntry, tCsrScanResult, Link );
             fMatch = FALSE;
+
 
             if (pFilter)
             for(i = 0; i < pFilter->SSIDs.numOfSSIDs; i++)
@@ -2187,19 +2356,27 @@ eHalStatus csrScanGetResult(tpAniSirGlobal pMac, tCsrScanResultFilter *pFilter, 
             }
             pEntry = csrLLNext(&pMac->scan.scanResultList, pEntry, LL_ACCESS_NOLOCK);
         }
+   }
 
-        if ( -128 != pMac->scan.inScanResultBestAPRssi)
+        if ((-128 != pMac->scan.inScanResultBestAPRssi) ||
+             CSR_IS_SELECT_5G_PREFERRED(pMac))
         {
             smsLog(pMac, LOG1, FL("Best AP Rssi is %d"), pMac->scan.inScanResultBestAPRssi);
             /* Modify Rssi category based on best AP Rssi */
+	    if (-128 != pMac->scan.inScanResultBestAPRssi)
             csrAssignRssiForCategory(pMac, pMac->scan.inScanResultBestAPRssi, pMac->roam.configParam.bCatRssiOffset);
+
             pEntry = csrLLPeekHead(&pMac->scan.scanResultList, LL_ACCESS_NOLOCK);
             while ( NULL != pEntry)
             {
                 pBssDesc = GET_BASE_ADDR( pEntry, tCsrScanResult, Link );
 
-                /* re-assign preference value based on modified rssi bucket */
-                pBssDesc->preferValue = csrGetBssPreferValue(pMac, (int)pBssDesc->Result.BssDescriptor.rssi);
+                /* re-assign preference value based on (modified rssi bucket (or)
+                 * prefer 5G feature.*/
+                pBssDesc->preferValue = csrGetBssPreferValue(pMac,
+                  (int)pBssDesc->Result.BssDescriptor.rssi,
+                  &pBssDesc->Result.BssDescriptor.bssId,
+                  pBssDesc->Result.BssDescriptor.channelId);
 
                 smsLog(pMac, LOG2, FL("BSSID("MAC_ADDRESS_STR
                        ") Rssi(%d) Chnl(%d) PrefVal(%u) SSID=%.*s"),
@@ -2333,7 +2510,7 @@ eHalStatus csrScanGetResult(tpAniSirGlobal pMac, tCsrScanResultFilter *pFilter, 
                     while(pTmpEntry)
                     {
                         pTmpResult = GET_BASE_ADDR( pTmpEntry, tCsrScanResult, Link );
-                        if(csrIsBetterBss(pResult, pTmpResult))
+                       if(csrIsBetterBss(pMac, pResult, pTmpResult))
                         {
                             csrLLInsertEntry(&pRetList->List, pTmpEntry, &pResult->Link, LL_ACCESS_NOLOCK);
                             //To indicate we are done
@@ -2344,7 +2521,7 @@ eHalStatus csrScanGetResult(tpAniSirGlobal pMac, tCsrScanResultFilter *pFilter, 
                     }
                     if(pResult != NULL)
                     {
-                        //This one is not better than any one
+                        /* This one is'nt better than anyone or the first one */
                         csrLLInsertTail(&pRetList->List, &pResult->Link, LL_ACCESS_NOLOCK);
                     }
                 }
@@ -3691,6 +3868,8 @@ tANI_BOOLEAN csrElectedCountryInfo(tpAniSirGlobal pMac)
     if (fRet)
     {
         memcpy(pMac->scan.countryCodeElected,
+            pMac->scan.votes11d[j].countryCode, WNI_CFG_COUNTRY_CODE_LEN);
+        vos_mem_copy(pMac->scan.countryCode11d,
             pMac->scan.votes11d[j].countryCode, WNI_CFG_COUNTRY_CODE_LEN);
         VOS_TRACE( VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO,
                  "Selected Country is %c%c With count %d\n",
@@ -5070,6 +5249,13 @@ static tANI_BOOLEAN csrScanProcessScanResults( tpAniSirGlobal pMac, tSmeCmd *pCo
                            csrLLCount(&pMac->scan.tempScanResults),
                            pScanRsp->statusCode);
         smsLog(pMac, LOG1, "scan reason is %d", pCommand->u.scanCmd.reason);
+#ifdef FEATURE_WLAN_DIAG_SUPPORT
+        csr_diag_event_report(pMac, eCSR_EVENT_SCAN_COMPLETE, eSIR_SUCCESS,
+                              eSIR_SUCCESS);
+        if (csrLLCount(&pMac->scan.tempScanResults) > 0)
+            csr_diag_event_report(pMac, eCSR_EVENT_SCAN_RES_FOUND, eSIR_SUCCESS,
+                                  eSIR_SUCCESS);
+#endif
         fRemoveCommand = csrScanComplete( pMac, pScanRsp );
         fRet = eANI_BOOLEAN_TRUE;
     }//if ( eSIR_SME_MORE_SCAN_RESULTS_FOLLOW != pScanRsp->statusCode )

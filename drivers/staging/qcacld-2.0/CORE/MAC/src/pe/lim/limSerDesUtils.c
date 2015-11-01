@@ -162,13 +162,13 @@ limGetBssDescription( tpAniSirGlobal pMac, tSirBssDescription *pBssDescription,
     if (limCheckRemainingLength(pMac, len) == eSIR_FAILURE)
         return eSIR_FAILURE;
 
+    // Extract aniIndicator
+    pBssDescription->aniIndicator = *pBuf++;
+    len --;
+
     // Extract rssi
     pBssDescription->rssi = (tANI_S8) *pBuf++;
     len --;
-
-    /* Extract raw rssi value */
-    pBssDescription->rssi_raw = (tANI_S8) *pBuf++;
-    len--;
 
     // Extract sinr
     pBssDescription->sinr = (tANI_S8) *pBuf++;
@@ -252,9 +252,13 @@ limGetBssDescription( tpAniSirGlobal pMac, tSirBssDescription *pBssDescription,
     if (limCheckRemainingLength(pMac, len) == eSIR_FAILURE)
         return eSIR_FAILURE;
 
-    /* 3 reserved bytes for padding */
-    pBuf += (3 * sizeof(tANI_U8));
-    len  -= 3;
+    /* Extract raw rssi value */
+    pBssDescription->rssi_raw = (tANI_S8) *pBuf++;
+    len--;
+
+    /* 2 reserved bytes for padding */
+    pBuf += (2 * sizeof(tANI_U8));
+    len  -= 2;
 
     pBssDescription->WscIeLen = limGetU32( pBuf );
     pBuf += sizeof(tANI_U32);
@@ -284,6 +288,12 @@ limGetBssDescription( tpAniSirGlobal pMac, tSirBssDescription *pBssDescription,
     /* 1 reserved byte padding */
     pBuf += (WSCIE_PROBE_RSP_LEN + 1);
     len -= (WSCIE_PROBE_RSP_LEN + 1);
+    if (limCheckRemainingLength(pMac, len) == eSIR_FAILURE)
+        return eSIR_FAILURE;
+
+    pBssDescription->tsf_delta = limGetU32(pBuf);
+    pBuf += sizeof(tANI_U32);
+    len  -= sizeof(tANI_U32);
 
     if (len > 0)
     {
@@ -340,8 +350,8 @@ limCopyBssDescription(tpAniSirGlobal pMac, tANI_U8 *pBuf, tSirBssDescription *pB
     len        += sizeof(tSirMacAddr);
 
    PELOG3(limLog(pMac, LOG3,
-       FL("Copying BSSdescr:channel is %d, bssId is "),
-       pBssDescription->channelId);
+       FL("Copying BSSdescr:channel is %d, aniInd is %d, bssId is "),
+       pBssDescription->channelId, pBssDescription->aniIndicator);
     limPrintMacAddr(pMac, pBssDescription->bssId, LOG3);)
 
     vos_mem_copy( pBuf,
@@ -370,10 +380,10 @@ limCopyBssDescription(tpAniSirGlobal pMac, tANI_U8 *pBuf, tSirBssDescription *pB
     pBuf       += sizeof(tANI_U32);
     len        += sizeof(tANI_U32);
 
-    *pBuf++ = pBssDescription->rssi;
+    *pBuf++ = pBssDescription->aniIndicator;
     len++;
 
-    *pBuf++ = pBssDescription->rssi_raw;
+    *pBuf++ = pBssDescription->rssi;
     len++;
 
     *pBuf++ = pBssDescription->sinr;

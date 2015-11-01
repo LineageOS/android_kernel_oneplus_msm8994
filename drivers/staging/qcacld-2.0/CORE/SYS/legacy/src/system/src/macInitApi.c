@@ -209,12 +209,13 @@ tSirRetStatus macOpen(tHalHandle *pHalHandle, tHddHandle hHdd, tMacOpenParameter
     p_mac->scan.nextScanID = FIRST_SCAN_ID;
     /* FW: 0 to 2047 and Host: 2048 to 4095 */
     p_mac->mgmtSeqNum = WLAN_HOST_SEQ_NUM_MIN-1;
+    p_mac->first_scan_done = false;
 
     status = peOpen(p_mac, pMacOpenParms);
 
     if (eSIR_SUCCESS != status) {
-        vos_mem_free(p_mac);
         sysLog(p_mac, LOGE, FL("macOpen failure\n"));
+        vos_mem_free(p_mac);
         return status;
     }
 
@@ -261,6 +262,9 @@ tSirRetStatus macClose(tHalHandle hHal)
 
     tpAniSirGlobal pMac = (tpAniSirGlobal) hHal;
     uint8_t i =0;
+
+    if (!pMac)
+        return eHAL_STATUS_FAILURE;
 
     peClose(pMac);
     pMac->psOffloadEnabled = FALSE;

@@ -108,7 +108,7 @@
 #ifdef CONFIG_SLUB_DEBUG_ON
 #define HDD_SSR_BRING_UP_TIME 20000
 #else
-#define HDD_SSR_BRING_UP_TIME 10000
+#define HDD_SSR_BRING_UP_TIME 15000
 #endif
 
 static eHalStatus g_full_pwr_status;
@@ -599,65 +599,63 @@ void hdd_conf_hostoffload(hdd_adapter_t *pAdapter, v_BOOL_t fenable)
 }
 
 #ifdef WLAN_NS_OFFLOAD
-void hdd_ipv6_notifier_work_queue(struct work_struct *work)
+
+static int __wlan_hdd_ipv6_changed(struct notifier_block *nb,
+				   unsigned long data, void *arg)
 {
-    hdd_adapter_t* pAdapter =
-             container_of(work, hdd_adapter_t, ipv6NotifierWorkQueue);
-    hdd_context_t *pHddCtx;
-    int status;
+	struct inet6_ifaddr *ifa = (struct inet6_ifaddr *)arg;
+	struct net_device *ndev = ifa->idev->dev;
+	hdd_context_t *hdd_ctx;
+	hdd_adapter_t *adapter;
+	int status;
 
-    hddLog(LOG1, FL("Reconfiguring NS Offload"));
+	hdd_ctx = container_of(nb, hdd_context_t, ipv6_notifier);
+	status = wlan_hdd_validate_context(hdd_ctx);
+	if (0 != status) {
+		hddLog(LOGE, FL("HDD context is invalid"));
+		return NOTIFY_DONE;
+	}
 
-    pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
-    status = wlan_hdd_validate_context(pHddCtx);
-    if (0 != status)
-    {
-        hddLog(LOGE, FL("HDD context is invalid"));
-        return;
-    }
+	adapter = WLAN_HDD_GET_PRIV_PTR(ndev);
+	if (WLAN_HDD_ADAPTER_MAGIC != adapter->magic) return NOTIFY_DONE;
+	if (adapter->dev != ndev) return NOTIFY_DONE;
+	if (WLAN_HDD_GET_CTX(adapter) != hdd_ctx) return NOTIFY_DONE;
 
-    if ( VOS_FALSE == pHddCtx->sus_res_mcastbcast_filter_valid)
-    {
-        pHddCtx->sus_res_mcastbcast_filter =
-            pHddCtx->configuredMcastBcastFilter;
-        pHddCtx->sus_res_mcastbcast_filter_valid = VOS_TRUE;
-    }
+	if (adapter->device_mode == WLAN_HDD_INFRA_STATION ||
+		(adapter->device_mode == WLAN_HDD_P2P_CLIENT)) {
+		if (hdd_ctx->cfg_ini->nEnableSuspend ==
+			WLAN_MAP_SUSPEND_TO_MCAST_BCAST_FILTER)
+			schedule_work(&adapter->ipv6NotifierWorkQueue);
+		else
+			hddLog(LOG1, FL("Not scheduling ipv6 wq nEnableSuspend: %d"),
+				hdd_ctx->cfg_ini->nEnableSuspend);
+	}
 
-    if ((eConnectionState_Associated ==
-                (WLAN_HDD_GET_STATION_CTX_PTR(pAdapter))->conn_info.connState)
-        && (pHddCtx->hdd_wlan_suspended))
-    {
-        // This invocation being part of the IPv6 registration callback,
-        // we are passing second parameter as 2 to avoid registration
-        // of IPv6 notifier again.
-        hdd_conf_ns_offload(pAdapter, 2);
-    }
+	return NOTIFY_DONE;
 }
 
-static int wlan_hdd_ipv6_changed(struct notifier_block *nb,
-                                   unsigned long data, void *arg)
+/**
+ * wlan_hdd_ipv6_changed() - IPv6 change notifier callback
+ * @nb: pointer to notifier block
+ * @data: data
+ * @arg: arg
+ *
+ * This is the IPv6 notifier callback function gets invoked
+ * if any change in IP and then invoke the function @__wlan_hdd_ipv6_changed
+ * to reconfigure the offload parameters.
+ *
+ * Return: 0 on success, error number otherwise.
+ */
+int wlan_hdd_ipv6_changed(struct notifier_block *nb,
+				unsigned long data, void *arg)
 {
-    struct inet6_ifaddr *ifa = (struct inet6_ifaddr *)arg;
-    struct net_device *ndev = ifa->idev->dev;
-    hdd_adapter_t *pAdapter =
-             container_of(nb, struct hdd_adapter_s, ipv6_notifier);
-    hdd_context_t *pHddCtx;
-    int status;
+	int ret;
 
-    if (pAdapter && pAdapter->dev == ndev)
-    {
-        pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
-        status = wlan_hdd_validate_context(pHddCtx);
-        if (0 != status)
-        {
-            hddLog(LOGE, FL("HDD context is invalid"));
-            return NOTIFY_DONE;
-        }
+	vos_ssr_protect(__func__);
+	ret = __wlan_hdd_ipv6_changed(nb, data, arg);
+	vos_ssr_unprotect(__func__);
 
-        schedule_work(&pAdapter->ipv6NotifierWorkQueue);
-    }
-
-    return NOTIFY_DONE;
+	return ret;
 }
 
 /**----------------------------------------------------------------------------
@@ -686,7 +684,6 @@ void hdd_conf_ns_offload(hdd_adapter_t *pAdapter, int fenable)
     hdd_context_t *pHddCtx;
 
     int i =0;
-    int ret =0;
     eHalStatus returnStatus;
 
     ENTER();
@@ -798,23 +795,6 @@ void hdd_conf_ns_offload(hdd_adapter_t *pAdapter, int fenable)
                     vos_mem_zero(&offLoadRequest, sizeof(offLoadRequest));
                 }
             }
-            if (fenable == 1 && !pAdapter->ipv6_notifier_registered)
-            {
-                // Register IPv6 notifier to notify if any change in IP
-                // So that we can reconfigure the offload parameters
-                pAdapter->ipv6_notifier.notifier_call =
-                             wlan_hdd_ipv6_changed;
-                ret = register_inet6addr_notifier(&pAdapter->ipv6_notifier);
-                if (ret)
-                {
-                    hddLog(LOGE, FL("Failed to register IPv6 notifier"));
-                }
-                else
-                {
-                    hddLog(LOG1, FL("Registered IPv6 notifier"));
-                    pAdapter->ipv6_notifier_registered = true;
-                }
-            }
         }
         else
         {
@@ -826,12 +806,6 @@ void hdd_conf_ns_offload(hdd_adapter_t *pAdapter, int fenable)
     else
     {
         //Disable NSOffload
-        if (pAdapter->ipv6_notifier_registered)
-        {
-            hddLog(LOG1, FL("Unregistered IPv6 notifier"));
-            unregister_inet6addr_notifier(&pAdapter->ipv6_notifier);
-            pAdapter->ipv6_notifier_registered = false;
-        }
         vos_mem_zero((void *)&offLoadRequest, sizeof(tSirHostOffloadReq));
         offLoadRequest.enableOrDisable = SIR_OFFLOAD_DISABLE;
         offLoadRequest.offloadType =  SIR_IPV6_NS_OFFLOAD;
@@ -851,9 +825,74 @@ void hdd_conf_ns_offload(hdd_adapter_t *pAdapter, int fenable)
     }
     return;
 }
+
+/**
+ * __hdd_ipv6_notifier_work_queue() - IP V6 change notifier work handler
+ * @work: Pointer to work context
+ *
+ * Return: none
+ */
+static void __hdd_ipv6_notifier_work_queue(struct work_struct *work)
+{
+    hdd_adapter_t* pAdapter =
+             container_of(work, hdd_adapter_t, ipv6NotifierWorkQueue);
+    hdd_context_t *pHddCtx;
+    int status;
+
+    hddLog(LOG1, FL("Reconfiguring NS Offload"));
+
+    pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+    status = wlan_hdd_validate_context(pHddCtx);
+    if (0 != status)
+    {
+        hddLog(LOGE, FL("HDD context is invalid"));
+        return;
+    }
+
+    if ( VOS_FALSE == pHddCtx->sus_res_mcastbcast_filter_valid)
+    {
+        pHddCtx->sus_res_mcastbcast_filter =
+            pHddCtx->configuredMcastBcastFilter;
+        pHddCtx->sus_res_mcastbcast_filter_valid = VOS_TRUE;
+    }
+
+    if ((eConnectionState_Associated ==
+                (WLAN_HDD_GET_STATION_CTX_PTR(pAdapter))->conn_info.connState)
+        && (pHddCtx->hdd_wlan_suspended))
+    {
+        /*
+         * This invocation being part of the IPv6 registration callback,
+         * we are passing second parameter as 2 to avoid registration
+         * of IPv6 notifier again
+         */
+        if (pHddCtx->cfg_ini->fhostNSOffload)
+            hdd_conf_ns_offload(pAdapter, 2);
+    }
+}
+
+/**
+ * hdd_ipv6_notifier_work_queue() - IP V6 change notifier work handler
+ * @work: Pointer to work context
+ *
+ * Return: none
+ */
+void hdd_ipv6_notifier_work_queue(struct work_struct *work)
+{
+	vos_ssr_protect(__func__);
+	__hdd_ipv6_notifier_work_queue(work);
+	vos_ssr_unprotect(__func__);
+}
+
+
 #endif
 
-void hdd_ipv4_notifier_work_queue(struct work_struct *work)
+/**
+ * __hdd_ipv4_notifier_work_queue() - IP V4 change notifier work handler
+ * @work: Pointer to work context
+ *
+ * Return: none
+ */
+static void __hdd_ipv4_notifier_work_queue(struct work_struct *work)
 {
     hdd_adapter_t* pAdapter =
              container_of(work, hdd_adapter_t, ipv4NotifierWorkQueue);
@@ -887,45 +926,95 @@ void hdd_ipv4_notifier_work_queue(struct work_struct *work)
     }
 }
 
-static int wlan_hdd_ipv4_changed(struct notifier_block *nb,
-                                   unsigned long data, void *arg)
+/**
+ * hdd_ipv4_notifier_work_queue() - IP V4 change notifier work handler
+ * @work: Pointer to work context
+ *
+ * Return: none
+ */
+void hdd_ipv4_notifier_work_queue(struct work_struct *work)
 {
-    struct in_ifaddr *ifa = (struct in_ifaddr *)arg;
-    struct in_ifaddr **ifap = NULL;
-    struct in_device *in_dev;
+	vos_ssr_protect(__func__);
+	__hdd_ipv4_notifier_work_queue(work);
+	vos_ssr_unprotect(__func__);
+}
 
-    struct net_device *ndev = ifa->ifa_dev->dev;
-    hdd_adapter_t *pAdapter =
-             container_of(nb, struct hdd_adapter_s, ipv4_notifier);
-    hdd_context_t *pHddCtx;
-    int status;
-    if (pAdapter && pAdapter->dev == ndev)
-    {
-       pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
-       status = wlan_hdd_validate_context(pHddCtx);
-       if (0 != status)
-       {
-           hddLog(LOGE, FL("HDD context is invalid"));
-           return NOTIFY_DONE;
-       }
-       if ((in_dev = __in_dev_get_rtnl(pAdapter->dev)) != NULL)
-       {
-           for (ifap = &in_dev->ifa_list; (ifa = *ifap) != NULL;
-                   ifap = &ifa->ifa_next)
-           {
-               if (!strcmp(pAdapter->dev->name, ifa->ifa_label))
-               {
-                   break; /* found */
-               }
-           }
-       }
-       if(ifa && ifa->ifa_local)
-       {
-           schedule_work(&pAdapter->ipv4NotifierWorkQueue);
-       }
-    }
+static int __wlan_hdd_ipv4_changed(struct notifier_block *nb,
+				   unsigned long data, void *arg)
+{
+	struct in_ifaddr *ifa = (struct in_ifaddr *)arg;
+	struct in_ifaddr **ifap = NULL;
+	struct in_device *in_dev;
+	struct net_device *ndev = ifa->ifa_dev->dev;
+	hdd_context_t *hdd_ctx;
+	hdd_adapter_t *adapter;
+	int status;
 
-    return NOTIFY_DONE;
+	hdd_ctx = container_of(nb, hdd_context_t, ipv4_notifier);
+	status = wlan_hdd_validate_context(hdd_ctx);
+	if (0 != status) {
+		hddLog(LOGE, FL("HDD context is invalid"));
+		return NOTIFY_DONE;
+	}
+
+	adapter = WLAN_HDD_GET_PRIV_PTR(ndev);
+	if (!adapter) return NOTIFY_DONE;
+	if (WLAN_HDD_ADAPTER_MAGIC != adapter->magic) return NOTIFY_DONE;
+	if (adapter->dev != ndev) return NOTIFY_DONE;
+	if (WLAN_HDD_GET_CTX(adapter) != hdd_ctx) return NOTIFY_DONE;
+        if (!(adapter->device_mode == WLAN_HDD_INFRA_STATION ||
+                adapter->device_mode == WLAN_HDD_P2P_CLIENT))
+		return NOTIFY_DONE;
+
+	if ((hdd_ctx->cfg_ini->nEnableSuspend !=
+				WLAN_MAP_SUSPEND_TO_MCAST_BCAST_FILTER) ||
+			(!hdd_ctx->cfg_ini->fhostArpOffload)) {
+		hddLog(LOG1, FL("Offload not enabled MCBC=%d, ARPOffload=%d"),
+				hdd_ctx->cfg_ini->nEnableSuspend,
+				hdd_ctx->cfg_ini->fhostArpOffload);
+
+		return NOTIFY_DONE;
+	}
+
+	in_dev = __in_dev_get_rtnl(adapter->dev);
+	if (in_dev != NULL) {
+		for (ifap = &in_dev->ifa_list;
+			(ifa = *ifap) != NULL;
+			ifap = &ifa->ifa_next) {
+			if (!strcmp(adapter->dev->name,
+				ifa->ifa_label))
+				break; /* found */
+		}
+	}
+
+	if (ifa && ifa->ifa_local)
+		schedule_work(&adapter->ipv4NotifierWorkQueue);
+
+	return NOTIFY_DONE;
+}
+
+/**
+ * wlan_hdd_ipv4_changed() - IPv4 change notifier callback
+ * @nb: pointer to notifier block
+ * @data: data
+ * @arg: arg
+ *
+ * This is the IPv4 notifier callback function gets invoked
+ * if any change in IP and then invoke the function @__wlan_hdd_ipv4_changed
+ * to reconfigure the offload parameters.
+ *
+ * Return: 0 on success, error number otherwise.
+ */
+int wlan_hdd_ipv4_changed(struct notifier_block *nb,
+				unsigned long data, void *arg)
+{
+	int ret;
+
+	vos_ssr_protect(__func__);
+	ret = __wlan_hdd_ipv4_changed(nb, data, arg);
+	vos_ssr_unprotect(__func__);
+
+	return ret;
 }
 
 /**----------------------------------------------------------------------------
@@ -950,11 +1039,11 @@ VOS_STATUS hdd_conf_arp_offload(hdd_adapter_t *pAdapter, int fenable)
    struct in_ifaddr *ifa = NULL;
    struct in_device *in_dev;
    int i = 0;
-   int ret = 0;
    tSirHostOffloadReq  offLoadRequest;
    hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
 
-   hddLog(VOS_TRACE_LEVEL_ERROR, FL(" fenable = %d \n"), fenable);
+   hddLog(LOG1, FL(" fenable = %d \n"), fenable);
+
    if(fenable)
    {
        if ((in_dev = __in_dev_get_rtnl(pAdapter->dev)) != NULL)
@@ -1016,33 +1105,10 @@ VOS_STATUS hdd_conf_arp_offload(hdd_adapter_t *pAdapter, int fenable)
            hddLog(VOS_TRACE_LEVEL_INFO, FL("IP Address is not assigned\n"));
        }
 
-       if (fenable == 1 && !pAdapter->ipv4_notifier_registered)
-       {
-           // Register IPv4 notifier to notify if any change in IP
-           // So that we can reconfigure the offload parameters
-           pAdapter->ipv4_notifier.notifier_call =
-                         wlan_hdd_ipv4_changed;
-           ret = register_inetaddr_notifier(&pAdapter->ipv4_notifier);
-           if (ret)
-           {
-               hddLog(LOGE, FL("Failed to register IPv4 notifier"));
-           }
-           else
-           {
-               hddLog(LOG1, FL("Registered IPv4 notifier"));
-               pAdapter->ipv4_notifier_registered = true;
-           }
-       }
        return VOS_STATUS_SUCCESS;
    }
    else
    {
-       if (pAdapter->ipv4_notifier_registered)
-       {
-            hddLog(LOG1, FL("Unregistered IPv4 notifier"));
-            unregister_inetaddr_notifier(&pAdapter->ipv4_notifier);
-            pAdapter->ipv4_notifier_registered = false;
-       }
        vos_mem_zero((void *)&offLoadRequest, sizeof(tSirHostOffloadReq));
        offLoadRequest.enableOrDisable = SIR_OFFLOAD_DISABLE;
        offLoadRequest.offloadType =  SIR_IPV4_ARP_REPLY_OFFLOAD;
@@ -1168,14 +1234,6 @@ static void hdd_conf_suspend_ind(hdd_context_t* pHddCtx,
         //Configure supported OffLoads
         hdd_conf_hostoffload(pAdapter, TRUE);
         wlanSuspendParam->configuredMcstBcstFilterSetting = pHddCtx->configuredMcastBcastFilter;
-
-#ifdef WLAN_FEATURE_PACKET_FILTERING
-        /* During suspend, configure MC Addr list filter to the firmware
-         * function takes care of checking necessary conditions before
-         * configuring.
-         */
-        wlan_hdd_set_mc_addr_list(pAdapter, TRUE);
-#endif
     }
 
     if ((eConnectionState_Associated ==
@@ -1234,14 +1292,6 @@ static void hdd_conf_resume_ind(hdd_adapter_t *pAdapter)
            "offload: in hdd_conf_resume_ind, restoring configuredMcastBcastFilter");
     hddLog(VOS_TRACE_LEVEL_INFO, "configuredMcastBcastFilter = %d",
                   pHddCtx->configuredMcastBcastFilter);
-
-
-#ifdef WLAN_FEATURE_PACKET_FILTERING
-    /* Filter was applied during suspend indication
-     * clear it when we resume.
-     */
-    wlan_hdd_set_mc_addr_list(pAdapter, FALSE);
-#endif
 }
 
 //Suspend routine registered with Android OS
@@ -1692,7 +1742,7 @@ VOS_STATUS hdd_wlan_reset_initialization(void)
    hddLog(VOS_TRACE_LEVEL_FATAL, "%s: Preventing the phone from going to suspend",__func__);
 
    // Prevent the phone from going to sleep
-   hdd_prevent_suspend();
+   hdd_prevent_suspend(WIFI_POWER_EVENT_WAKELOCK_DRIVER_REINIT);
 
    return VOS_STATUS_SUCCESS;
 }
@@ -1923,8 +1973,6 @@ VOS_STATUS hdd_wlan_shutdown(void)
        VOS_ASSERT(0);
    }
 
-   hif_disable_isr(((VosContextType*)pVosContext)->pHIFContext);
-
    hdd_unregister_mcast_bcast_filter(pHddCtx);
 
    hddLog(VOS_TRACE_LEVEL_INFO, "%s: Flush Queues",__func__);
@@ -1972,8 +2020,7 @@ VOS_STATUS hdd_wlan_re_init(void *hif_sc)
 
    hdd_adapter_t *pAdapter;
    int i;
-   hdd_prevent_suspend();
-
+   hdd_prevent_suspend(WIFI_POWER_EVENT_WAKELOCK_DRIVER_REINIT);
 
    vos_set_reinit_in_progress(VOS_MODULE_ID_VOSS, TRUE);
 
@@ -2172,8 +2219,9 @@ VOS_STATUS hdd_wlan_re_init(void *hif_sc)
       }
    }
 
-   pHddCtx->isLogpInProgress = FALSE;
-   vos_set_logp_in_progress(VOS_MODULE_ID_VOSS, FALSE);
+   /* Register TM level change handler function to the platform */
+   hddDevTmRegisterNotifyCallback(pHddCtx);
+
    pHddCtx->hdd_mcastbcast_filter_set = FALSE;
    hdd_register_mcast_bcast_filter(pHddCtx);
    hdd_ssr_timer_del();
@@ -2181,7 +2229,7 @@ VOS_STATUS hdd_wlan_re_init(void *hif_sc)
    wlan_hdd_send_svc_nlink_msg(WLAN_SVC_FW_CRASHED_IND, NULL, 0);
 
    /* Allow the phone to go to sleep */
-   hdd_allow_suspend();
+   hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_DRIVER_REINIT);
    /* register for riva power on lock */
    if (req_riva_power_on_lock("wlan"))
    {
@@ -2190,6 +2238,11 @@ VOS_STATUS hdd_wlan_re_init(void *hif_sc)
       goto err_unregister_pmops;
    }
    vos_set_reinit_in_progress(VOS_MODULE_ID_VOSS, FALSE);
+   sme_set_rssi_threshold_breached_cb(pHddCtx->hHal, hdd_rssi_threshold_breached);
+#ifdef FEATURE_WLAN_EXTSCAN
+   sme_ExtScanRegisterCallback(pHddCtx->hHal,
+                               wlan_hdd_cfg80211_extscan_callback);
+#endif /* FEATURE_WLAN_EXTSCAN */
 
 #ifdef WLAN_FEATURE_LPSS
    wlan_hdd_send_all_scan_intf_info(pHddCtx);
@@ -2246,7 +2299,7 @@ err_vosclose:
 
 err_re_init:
    /* Allow the phone to go to sleep */
-   hdd_allow_suspend();
+   hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_DRIVER_REINIT);
    vos_set_reinit_in_progress(VOS_MODULE_ID_VOSS, FALSE);
    VOS_BUG(0);
    return -EPERM;
@@ -2254,5 +2307,6 @@ err_re_init:
 success:
    /* Trigger replay of BTC events */
    send_btc_nlink_msg(WLAN_MODULE_DOWN_IND, 0);
+   pHddCtx->isLogpInProgress = FALSE;
    return VOS_STATUS_SUCCESS;
 }

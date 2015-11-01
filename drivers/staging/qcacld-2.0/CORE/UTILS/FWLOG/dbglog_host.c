@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -1647,7 +1647,10 @@ send_fw_diag_nl_data(wmi_unified_t wmi_handle, const u_int8_t *buffer,
     if (WARN_ON(len > ATH6KL_FWLOG_PAYLOAD_SIZE))
         return -ENODEV;
 
-    if (cnss_diag_pid != INVALID_PID)
+    if (nl_srv_is_initialized() != 0)
+        return -EIO;
+
+    if (vos_is_multicast_logging())
     {
         skb_out = nlmsg_new(len, 0);
         if (!skb_out)
@@ -1655,16 +1658,14 @@ send_fw_diag_nl_data(wmi_unified_t wmi_handle, const u_int8_t *buffer,
             AR_DEBUG_PRINTF(ATH_DEBUG_ERR, ("Failed to allocate new skb\n"));
             return -1;
         }
-        nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, len, 0);
+        nlh = nlmsg_put(skb_out, 0, 0, WLAN_NL_MSG_CNSS_DIAG, len, 0);
         memcpy(nlmsg_data(nlh), buffer, len);
-        NETLINK_CB(skb_out).dst_group = 0; /* not in mcast group */
 
-        res = nl_srv_ucast(skb_out, cnss_diag_pid, MSG_DONTWAIT);
+        res = nl_srv_bcast(skb_out);
         if (res < 0)
         {
             AR_DEBUG_PRINTF(ATH_DEBUG_RSVD1,
-                            ("nl_srv_ucast failed 0x%x \n", res));
-            cnss_diag_pid = INVALID_PID;
+                            ("%s: nl_srv_bcast failed 0x%x \n", __func__, res));
             return res;
         }
     }
@@ -1684,7 +1685,11 @@ send_diag_netlink_data(const u_int8_t *buffer,
     if (WARN_ON(len > ATH6KL_FWLOG_PAYLOAD_SIZE))
         return -ENODEV;
 
-    if (cnss_diag_pid != INVALID_PID) {
+    if (nl_srv_is_initialized() != 0)
+        return -EIO;
+
+
+    if (vos_is_multicast_logging()) {
         slot_len = sizeof(*slot) + ATH6KL_FWLOG_PAYLOAD_SIZE;
 
         skb_out = nlmsg_new(slot_len, 0);
@@ -1694,7 +1699,7 @@ send_diag_netlink_data(const u_int8_t *buffer,
             return -1;
         }
 
-        nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, slot_len, 0);
+        nlh = nlmsg_put(skb_out, 0, 0, WLAN_NL_MSG_CNSS_DIAG, slot_len, 0);
         slot = (struct dbglog_slot *) nlmsg_data(nlh);
         slot->diag_type = cmd;
         slot->timestamp = cpu_to_le32(jiffies);
@@ -1702,13 +1707,11 @@ send_diag_netlink_data(const u_int8_t *buffer,
         /* Version mapped to get_version here */
         slot->dropped = get_version;
         memcpy(slot->payload, buffer, len);
-        NETLINK_CB(skb_out).dst_group = 0; /* not in mcast group */
 
-        res = nl_srv_ucast(skb_out, cnss_diag_pid, MSG_DONTWAIT);
+        res = nl_srv_bcast(skb_out);
         if (res < 0) {
             AR_DEBUG_PRINTF(ATH_DEBUG_RSVD1,
-                            ("nl_srv_ucast failed 0x%x \n", res));
-            cnss_diag_pid = INVALID_PID;
+                            ("%s: nl_srv_bcast failed 0x%x \n", __func__, res));
             return res;
         }
     }
@@ -1729,7 +1732,11 @@ dbglog_process_netlink_data(wmi_unified_t wmi_handle, const u_int8_t *buffer,
     if (WARN_ON(len > ATH6KL_FWLOG_PAYLOAD_SIZE))
         return -ENODEV;
 
-    if (cnss_diag_pid != INVALID_PID)
+    if (nl_srv_is_initialized() != 0)
+            return -EIO;
+
+
+    if (vos_is_multicast_logging())
     {
         slot_len = sizeof(*slot) + ATH6KL_FWLOG_PAYLOAD_SIZE;
 
@@ -1740,21 +1747,19 @@ dbglog_process_netlink_data(wmi_unified_t wmi_handle, const u_int8_t *buffer,
             return -1;
         }
 
-        nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, slot_len, 0);
+        nlh = nlmsg_put(skb_out, 0, 0, WLAN_NL_MSG_CNSS_DIAG, slot_len, 0);
         slot = (struct dbglog_slot *) nlmsg_data(nlh);
         slot->diag_type = (A_UINT32)DIAG_TYPE_FW_DEBUG_MSG;
         slot->timestamp = cpu_to_le32(jiffies);
         slot->length = cpu_to_le32(len);
         slot->dropped = cpu_to_le32(dropped);
         memcpy(slot->payload, buffer, len);
-        NETLINK_CB(skb_out).dst_group = 0; /* not in mcast group */
 
-        res = nl_srv_ucast(skb_out, cnss_diag_pid, MSG_DONTWAIT);
+        res = nl_srv_bcast(skb_out);
         if (res < 0)
         {
             AR_DEBUG_PRINTF(ATH_DEBUG_RSVD1,
-                            ("nl_srv_ucast failed 0x%x \n", res));
-            cnss_diag_pid = INVALID_PID;
+                            ("%s: nl_srv_bcast failed 0x%x \n", __func__, res));
             return res;
         }
     }
@@ -1820,8 +1825,7 @@ diag_fw_handler(ol_scn_t scn, u_int8_t *data, u_int32_t datalen)
         return 0;
     }
 
-    if ( (dbglog_process_type == DBGLOG_PROCESS_NET_RAW) &&
-        (cnss_diag_pid != 0)) {
+    if ( dbglog_process_type == DBGLOG_PROCESS_NET_RAW) {
          return send_diag_netlink_data((A_UINT8 *)datap,
                                           len, DIAG_TYPE_FW_MSG);
     }

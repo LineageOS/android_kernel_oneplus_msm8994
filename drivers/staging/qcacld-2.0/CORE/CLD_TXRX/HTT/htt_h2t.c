@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -59,6 +59,19 @@
 #ifndef container_of
 #define container_of(ptr, type, member) ((type *)( \
                 (char *)(ptr) - (char *)(&((type *)0)->member) ) )
+#endif
+
+#ifdef FEATURE_RUNTIME_PM
+void
+htt_tx_resume_handler(void *context)
+{
+   struct htt_pdev_t *pdev =  (struct htt_pdev_t *) context;
+
+   htt_tx_sched(pdev);
+}
+#else
+void
+htt_tx_resume_handler(void *context) { }
 #endif
 
 static void
@@ -332,6 +345,7 @@ htt_h2t_rx_ring_cfg_msg_ll(struct htt_pdev_t *pdev)
 #ifdef ATH_11AC_TXCOMPACT
     if (HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt) == A_OK) {
         htt_htc_misc_pkt_list_add(pdev, pkt);
+        htc_pm_runtime_put(pdev->htc_pdev);
     }
 #else
     HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt);
@@ -623,6 +637,7 @@ htt_h2t_sync_msg(struct htt_pdev_t *pdev, u_int8_t sync_cnt)
 #ifdef ATH_11AC_TXCOMPACT
     if (HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt) == A_OK) {
         htt_htc_misc_pkt_list_add(pdev, pkt);
+        htc_pm_runtime_put(pdev->htc_pdev);
     }
 #else
     HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt);
@@ -694,6 +709,7 @@ htt_h2t_aggr_cfg_msg(struct htt_pdev_t *pdev,
 #ifdef ATH_11AC_TXCOMPACT
     if (HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt) == A_OK) {
         htt_htc_misc_pkt_list_add(pdev, pkt);
+        htc_pm_runtime_put(pdev->htc_pdev);
     }
 #else
     HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt);
@@ -795,8 +811,10 @@ int htt_h2t_ipa_uc_rsc_cfg_msg(struct htt_pdev_t *pdev)
     SET_HTC_PACKET_NET_BUF_CONTEXT(&pkt->htc_pkt, msg);
 
 #ifdef ATH_11AC_TXCOMPACT
-    if (HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt) == A_OK)
+    if (HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt) == A_OK) {
         htt_htc_misc_pkt_list_add(pdev, pkt);
+        htc_pm_runtime_put(pdev->htc_pdev);
+    }
 #else
     HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt);
 #endif
@@ -886,64 +904,58 @@ int htt_h2t_ipa_uc_set_active(struct htt_pdev_t *pdev,
 
 int htt_h2t_ipa_uc_get_stats(struct htt_pdev_t *pdev)
 {
-    static struct htt_htc_pkt *pkt = NULL;
-    static adf_nbuf_t msg = NULL;
+    struct htt_htc_pkt *pkt = NULL;
+    adf_nbuf_t msg = NULL;
     u_int32_t *msg_word;
 
-    if ((!pkt) || (!msg)) {
-        /* New buffer alloc send */
-        pkt = htt_htc_pkt_alloc(pdev);
-        if (!pkt) {
-            return A_NO_MEMORY;
-        }
+    /* New buffer alloc send */
+    pkt = htt_htc_pkt_alloc(pdev);
+    if (!pkt) {
+        return A_NO_MEMORY;
+    }
 
-        /* show that this is not a tx frame download (not required,
-         * but helpful) */
-        pkt->msdu_id = HTT_TX_COMPL_INV_MSDU_ID;
-        pkt->pdev_ctxt = NULL; /* not used during send-done callback */
+    /* show that this is not a tx frame download (not required,
+     * but helpful) */
+    pkt->msdu_id = HTT_TX_COMPL_INV_MSDU_ID;
+    pkt->pdev_ctxt = NULL; /* not used during send-done callback */
 
-        msg = adf_nbuf_alloc(
-                pdev->osdev,
-                HTT_MSG_BUF_SIZE(HTT_WDI_IPA_OP_REQUEST_SZ),
-                /* reserve room for HTC header */
-                HTC_HEADER_LEN + HTC_HDR_ALIGNMENT_PADDING, 4, FALSE);
-        if (!msg) {
-            htt_htc_pkt_free(pdev, pkt);
-            return A_NO_MEMORY;
-        }
-        /* set the length of the message */
-        adf_nbuf_put_tail(msg, HTT_WDI_IPA_OP_REQUEST_SZ);
-        /* rewind beyond alignment pad to get to the HTC header reserved area */
-        adf_nbuf_push_head(msg, HTC_HDR_ALIGNMENT_PADDING);
+    msg = adf_nbuf_alloc(
+                         pdev->osdev,
+                         HTT_MSG_BUF_SIZE(HTT_WDI_IPA_OP_REQUEST_SZ),
+                         /* reserve room for HTC header */
+                         HTC_HEADER_LEN + HTC_HDR_ALIGNMENT_PADDING, 4, FALSE);
+    if (!msg) {
+        htt_htc_pkt_free(pdev, pkt);
+        return A_NO_MEMORY;
+    }
+    /* set the length of the message */
+    adf_nbuf_put_tail(msg, HTT_WDI_IPA_OP_REQUEST_SZ);
+    /* rewind beyond alignment pad to get to the HTC header reserved area */
+    adf_nbuf_push_head(msg, HTC_HDR_ALIGNMENT_PADDING);
 
-        /* fill in the message contents */
-        msg_word = (u_int32_t *) adf_nbuf_data(msg);
-        *msg_word = 0;
-        HTT_WDI_IPA_OP_REQUEST_OP_CODE_SET(*msg_word,
-             HTT_WDI_IPA_OPCODE_DBG_STATS);
-        HTT_H2T_MSG_TYPE_SET(*msg_word, HTT_H2T_MSG_TYPE_WDI_IPA_OP_REQ);
+    /* fill in the message contents */
+    msg_word = (u_int32_t *) adf_nbuf_data(msg);
+    *msg_word = 0;
+    HTT_WDI_IPA_OP_REQUEST_OP_CODE_SET(*msg_word,
+                                       HTT_WDI_IPA_OPCODE_DBG_STATS);
+    HTT_H2T_MSG_TYPE_SET(*msg_word, HTT_H2T_MSG_TYPE_WDI_IPA_OP_REQ);
 
-        SET_HTC_PACKET_INFO_TX(
-            &pkt->htc_pkt,
-            htt_h2t_send_complete_free_netbuf,
-            adf_nbuf_data(msg),
-            adf_nbuf_len(msg),
-            pdev->htc_endpoint,
-            1); /* tag - not relevant here */
+    SET_HTC_PACKET_INFO_TX(
+                           &pkt->htc_pkt,
+                           htt_h2t_send_complete_free_netbuf,
+                           adf_nbuf_data(msg),
+                           adf_nbuf_len(msg),
+                           pdev->htc_endpoint,
+                           1); /* tag - not relevant here */
 
-        SET_HTC_PACKET_NET_BUF_CONTEXT(&pkt->htc_pkt, msg);
+    SET_HTC_PACKET_NET_BUF_CONTEXT(&pkt->htc_pkt, msg);
 
 #ifdef ATH_11AC_TXCOMPACT
-        if (HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt) == A_OK)
-            htt_htc_misc_pkt_list_add(pdev, pkt);
+    if (HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt) == A_OK)
+        htt_htc_misc_pkt_list_add(pdev, pkt);
 #else
-        HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt);
+    HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt);
 #endif
-    } else {
-        /* Cached MSG send */
-        adf_nbuf_pull_head(msg, sizeof(HTC_FRAME_HDR));
-        HTCSendPkt(pdev->htc_pdev, &pkt->htc_pkt);
-    }
     return A_OK;
 }
 #endif /* IPA_UC_OFFLOAD */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -74,8 +74,9 @@ typedef enum {
     GEN_PARAM_DUMP_WATCHDOG,
     GEN_PARAM_CRASH_INJECT,
 #ifdef CONFIG_ATH_PCIE_ACCESS_DEBUG
-    GEN_PARAM_DUMP_PCIE_ACCESS_LOG
+    GEN_PARAM_DUMP_PCIE_ACCESS_LOG,
 #endif
+    GEN_PARAM_MODULATED_DTIM,
 } GEN_PARAM;
 
 #define VDEV_CMD 1
@@ -97,6 +98,8 @@ VOS_STATUS wma_stop(v_VOID_t *vos_context, tANI_U8 reason);
 VOS_STATUS wma_close(v_VOID_t *vos_context);
 
 VOS_STATUS wma_wmi_service_close(v_VOID_t *vos_context);
+
+VOS_STATUS wma_wmi_work_close(v_VOID_t *vos_context);
 
 v_VOID_t wma_rx_ready_event(WMA_HANDLE handle, v_VOID_t *ev);
 
@@ -121,11 +124,16 @@ VOS_STATUS WMA_GetWcnssSoftwareVersion(v_PVOID_t pvosGCtx, tANI_U8 *pVersion,
                                        tANI_U32 versionBufferSize);
 int wma_suspend_target(WMA_HANDLE handle, int disable_target_intr);
 void wma_target_suspend_acknowledge(void *context);
-int wma_resume_target(WMA_HANDLE handle);
-int wma_disable_wow_in_fw(WMA_HANDLE handle);
+int wma_resume_target(WMA_HANDLE handle, int);
+int wma_disable_wow_in_fw(WMA_HANDLE handle, int);
 int wma_is_wow_mode_selected(WMA_HANDLE handle);
-int wma_enable_wow_in_fw(WMA_HANDLE handle);
+int wma_enable_wow_in_fw(WMA_HANDLE handle, int);
 bool wma_check_scan_in_progress(WMA_HANDLE handle);
+#ifdef FEATURE_RUNTIME_PM
+int wma_runtime_suspend_req(WMA_HANDLE handle);
+int wma_runtime_resume_req(WMA_HANDLE handle);
+#endif
+
 #ifdef FEATURE_WLAN_D0WOW
 int wma_get_client_count(WMA_HANDLE handle);
 #endif

@@ -102,9 +102,9 @@
             ((dot11Mode == WNI_CFG_DOT11_MODE_11B) ? TRUE : FALSE)
 
 #define IS_BSS_VHT_CAPABLE(vhtCaps) \
-            ((vhtCaps).present && \
-             ((vhtCaps).rxMCSMap != 0xFFFF) && \
-             ((vhtCaps).txMCSMap != 0xFFFF))
+		((vhtCaps).present && \
+		((vhtCaps).rxMCSMap != 0xFFFF) && \
+		((vhtCaps).txMCSMap != 0xFFFF))
 
 /// Proprietary IE definition
 typedef struct sSirMacPropIE
@@ -187,6 +187,8 @@ typedef struct sChannelSwitchPropIEStruct
 // generic proprietary IE structure definition
 typedef struct sSirPropIEStruct
 {
+    tANI_U8                    aniIndicator;
+
     tANI_U8                    propRatesPresent:1;
     tANI_U8                    apNamePresent:1;
     tANI_U8                    loadBalanceInfoPresent:1;

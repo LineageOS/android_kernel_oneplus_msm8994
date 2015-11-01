@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -48,14 +48,20 @@
 #include "vos_lock.h"
 #include "vos_memory.h"
 #include "vos_trace.h"
+#include "hif.h"
+#include "i_vos_diag_core_event.h"
 #ifdef CONFIG_CNSS
 #include <net/cnss.h>
 #endif
-
+#include "vos_api.h"
+#include "aniGlobal.h"
 
 /*----------------------------------------------------------------------------
  * Preprocessor Definitions and Constants
  * -------------------------------------------------------------------------*/
+#define WIFI_POWER_EVENT_DEFAULT_WAKELOCK_TIMEOUT 0
+#define WIFI_POWER_EVENT_WAKELOCK_TAKEN 0
+#define WIFI_POWER_EVENT_WAKELOCK_RELEASED 1
 
 /*----------------------------------------------------------------------------
  * Type Declarations
@@ -506,6 +512,28 @@ VOS_STATUS vos_wake_lock_init(vos_wake_lock_t *pLock, const char *name)
     return VOS_STATUS_SUCCESS;
 }
 
+/**
+ * vos_wake_lock_name() - This function returns the name of the wakelock
+ * @pLock: Pointer to the wakelock
+ *
+ * This function returns the name of the wakelock
+ *
+ * Return: Pointer to the name if it is valid or a default string
+ *
+ */
+static const char* vos_wake_lock_name(vos_wake_lock_t *pLock)
+{
+#if  !defined(CONFIG_CNSS) && \
+	!(defined(WLAN_OPEN_SOURCE) && defined(CONFIG_HAS_WAKELOCK))
+	return "UNNAMED_WAKELOCK";
+#else
+	if (pLock->name)
+		return pLock->name;
+	else
+		return "UNNAMED_WAKELOCK";
+#endif
+}
+
 /*--------------------------------------------------------------------------
 
   \brief vos_wake_lock_acquire() - acquires a wake lock
@@ -515,8 +543,25 @@ VOS_STATUS vos_wake_lock_init(vos_wake_lock_t *pLock, const char *name)
   \return VOS_STATUS_SUCCESS - the wake lock was successfully acquired
 
   ------------------------------------------------------------------------*/
-VOS_STATUS vos_wake_lock_acquire(vos_wake_lock_t *pLock)
+VOS_STATUS vos_wake_lock_acquire(vos_wake_lock_t *pLock,
+                                 uint32_t reason)
 {
+    vos_log_wlock_diag(reason, vos_wake_lock_name(pLock),
+                       WIFI_POWER_EVENT_DEFAULT_WAKELOCK_TIMEOUT,
+                       WIFI_POWER_EVENT_WAKELOCK_TAKEN);
+
+    /*
+     * Dont prevent Autosuspend for these reasons, either it is not required to
+     * do so or runtime functionality is not available at this time
+     */
+    switch(reason) {
+    case WIFI_POWER_EVENT_WAKELOCK_DRIVER_INIT:
+    case WIFI_POWER_EVENT_WAKELOCK_DRIVER_REINIT:
+        break;
+    default:
+        vos_runtime_pm_prevent_suspend();
+        break;
+    }
 #if defined CONFIG_CNSS
     cnss_pm_wake_lock(pLock);
 #elif defined(WLAN_OPEN_SOURCE) && defined(CONFIG_HAS_WAKELOCK)
@@ -534,8 +579,20 @@ VOS_STATUS vos_wake_lock_acquire(vos_wake_lock_t *pLock)
   \return VOS_STATUS_SUCCESS - the wake lock was successfully acquired
 
   ------------------------------------------------------------------------*/
-VOS_STATUS vos_wake_lock_timeout_acquire(vos_wake_lock_t *pLock, v_U32_t msec)
+VOS_STATUS vos_wake_lock_timeout_acquire(vos_wake_lock_t *pLock, v_U32_t msec,
+                                         uint32_t reason)
 {
+    /* Wakelock for Rx is frequent.
+     * It is reported only during active debug
+     */
+    if (((vos_get_ring_log_level(RING_ID_WAKELOCK) >= WLAN_LOG_LEVEL_ACTIVE)
+         && (WIFI_POWER_EVENT_WAKELOCK_HOLD_RX == reason)) ||
+         (WIFI_POWER_EVENT_WAKELOCK_HOLD_RX != reason)) {
+        vos_log_wlock_diag(reason, vos_wake_lock_name(pLock), msec,
+                           WIFI_POWER_EVENT_WAKELOCK_TAKEN);
+    }
+
+    vos_runtime_pm_prevent_suspend_timeout(msec);
 #if defined CONFIG_CNSS
     cnss_pm_wake_lock_timeout(pLock, msec);
 #elif defined(WLAN_OPEN_SOURCE) && defined(CONFIG_HAS_WAKELOCK)
@@ -553,13 +610,29 @@ VOS_STATUS vos_wake_lock_timeout_acquire(vos_wake_lock_t *pLock, v_U32_t msec)
   \return VOS_STATUS_SUCCESS - the lock was successfully released
 
   ------------------------------------------------------------------------*/
-VOS_STATUS vos_wake_lock_release(vos_wake_lock_t *pLock)
+VOS_STATUS vos_wake_lock_release(vos_wake_lock_t *pLock, uint32_t reason)
 {
+    vos_log_wlock_diag(reason, vos_wake_lock_name(pLock),
+                       WIFI_POWER_EVENT_DEFAULT_WAKELOCK_TIMEOUT,
+                       WIFI_POWER_EVENT_WAKELOCK_RELEASED);
 #if defined CONFIG_CNSS
     cnss_pm_wake_lock_release(pLock);
 #elif defined(WLAN_OPEN_SOURCE) && defined(CONFIG_HAS_WAKELOCK)
     wake_unlock(pLock);
 #endif
+    /*
+     * Dont allow autosuspend for these reasons, these reasons doesn't prevent
+     * the autosuspend so no need to call allow.
+     */
+    switch(reason) {
+    case WIFI_POWER_EVENT_WAKELOCK_DRIVER_INIT:
+    case WIFI_POWER_EVENT_WAKELOCK_DRIVER_REINIT:
+        break;
+    default:
+        vos_runtime_pm_allow_suspend();
+        break;
+    }
+
     return VOS_STATUS_SUCCESS;
 }
 
@@ -580,4 +653,83 @@ VOS_STATUS vos_wake_lock_destroy(vos_wake_lock_t *pLock)
     wake_lock_destroy(pLock);
 #endif
     return VOS_STATUS_SUCCESS;
+}
+
+VOS_STATUS vos_runtime_pm_prevent_suspend(void)
+{
+	void *ol_sc;
+	int ret = 0;
+
+	ol_sc = vos_get_context(VOS_MODULE_ID_HIF,
+			vos_get_global_context(VOS_MODULE_ID_SYS, NULL));
+
+	if (ol_sc == NULL) {
+		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+				"%s: HIF context is null!", __func__);
+		return VOS_STATUS_E_INVAL;
+	}
+
+	ret = hif_pm_runtime_prevent_suspend(ol_sc);
+
+	if (ret)
+		return VOS_STATUS_E_FAILURE;
+
+	return VOS_STATUS_SUCCESS;
+}
+
+VOS_STATUS vos_runtime_pm_allow_suspend(void)
+{
+	void *ol_sc;
+	int ret = 0;
+
+	ol_sc = vos_get_context(VOS_MODULE_ID_HIF,
+			vos_get_global_context(VOS_MODULE_ID_SYS, NULL));
+
+	if (ol_sc == NULL) {
+		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+				"%s: HIF context is null!", __func__);
+		return VOS_STATUS_E_INVAL;
+	}
+
+	ret = hif_pm_runtime_allow_suspend(ol_sc);
+
+	if (ret)
+		return VOS_STATUS_E_FAILURE;
+
+	return VOS_STATUS_SUCCESS;
+}
+
+/**
+ * vos_runtime_pm_prevent_suspend_timeout() - Prevent runtime suspend timeout
+ * msec:	Timeout in milliseconds
+ *
+ * Prevent runtime suspend with a timeout after which runtime suspend would be
+ * allowed. This API uses a single timer to allow the suspend and timer is
+ * modified if the timeout is changed before timer fires.
+ * If the timeout is less than autosuspend_delay then use mark_last_busy instead
+ * of starting the timer.
+ *
+ * It is wise to try not to use this API and correct the design if possible.
+ *
+ * Return: VOS_STATUS
+ */
+VOS_STATUS vos_runtime_pm_prevent_suspend_timeout(unsigned int msec)
+{
+	void *ol_sc;
+	int ret = 0;
+
+	ol_sc = vos_get_context(VOS_MODULE_ID_HIF,
+			vos_get_global_context(VOS_MODULE_ID_SYS, NULL));
+
+	if (ol_sc == NULL) {
+		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+				"%s: HIF context is null!", __func__);
+		return VOS_STATUS_E_INVAL;
+	}
+
+        ret = hif_pm_runtime_prevent_suspend_timeout(ol_sc, msec);
+	if (ret)
+		return VOS_STATUS_E_FAILURE;
+
+	return VOS_STATUS_SUCCESS;
 }

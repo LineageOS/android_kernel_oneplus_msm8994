@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -99,6 +99,7 @@ void nl_srv_exit(void)
 #endif /* WLAN_KD_READY_NOTIFIER */
 {
    netlink_kernel_release(nl_srv_sock);
+   nl_srv_sock = NULL;
 }
 
 /*
@@ -151,7 +152,7 @@ int nl_srv_unregister(tWlanNlModTypes msg_type, nl_srv_msg_callback msg_handler)
  */
 int nl_srv_ucast(struct sk_buff *skb, int dst_pid, int flag)
 {
-   int err;
+   int err = 0;
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,7,0))
    NETLINK_CB(skb).pid = 0; //sender's pid
@@ -160,8 +161,9 @@ int nl_srv_ucast(struct sk_buff *skb, int dst_pid, int flag)
 #endif
    NETLINK_CB(skb).dst_group = 0; //not multicast
 
-   err = netlink_unicast(nl_srv_sock, skb, dst_pid, flag);
-
+   if (nl_srv_sock != NULL) {
+       err = netlink_unicast(nl_srv_sock, skb, dst_pid, flag);
+   }
    if (err < 0)
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
       "NLINK: netlink_unicast to pid[%d] failed, ret[0x%X]", dst_pid, err);
@@ -175,7 +177,7 @@ int nl_srv_ucast(struct sk_buff *skb, int dst_pid, int flag)
  */
 int nl_srv_bcast(struct sk_buff *skb)
 {
-   int err;
+   int err = 0;
    int flags = GFP_KERNEL;
 
    if (in_interrupt() || irqs_disabled() || in_atomic())
@@ -188,8 +190,9 @@ int nl_srv_bcast(struct sk_buff *skb)
 #endif
    NETLINK_CB(skb).dst_group = WLAN_NLINK_MCAST_GRP_ID; //destination group
 
-   err = netlink_broadcast(nl_srv_sock, skb, 0, WLAN_NLINK_MCAST_GRP_ID, flags);
-
+   if (nl_srv_sock != NULL) {
+       err = netlink_broadcast(nl_srv_sock, skb, 0, WLAN_NLINK_MCAST_GRP_ID, flags);
+   }
    if (err < 0)
    {
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
@@ -286,4 +289,21 @@ static void nl_srv_rcv_msg (struct sk_buff *skb, struct nlmsghdr *nlh)
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
          "NLINK: No handler for Netlink Msg [0x%X]", type);
    }
+}
+
+/**
+ * nl_srv_is_initialized() - This function is used check if the netlink
+ * service is initialized
+ *
+ * This function is used check if the netlink service is initialized
+ *
+ * Return: Return -EPERM if the service is not initialized
+ *
+ */
+int nl_srv_is_initialized()
+{
+	if (nl_srv_sock)
+		return 0;
+	else
+		return -EPERM;
 }

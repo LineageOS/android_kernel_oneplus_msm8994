@@ -1300,10 +1300,16 @@ WLANSAP_ModifyACL
             {
                 if (staInWhiteList)
                 {
+                    struct tagCsrDelStaParams delStaParams;
+
                     VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO, "Delete from white list");
                     sapRemoveMacFromACL(pSapCtx->acceptMacList, &pSapCtx->nAcceptMac, staWLIndex);
                     /* If a client is deleted from white list and the client is connected, send deauth*/
-                    WLANSAP_DeauthSta(pCtx, pPeerStaMac);
+                    WLANSAP_PopulateDelStaParams(pPeerStaMac,
+                                                  eCsrForcedDeauthSta,
+                                                  (SIR_MAC_MGMT_DEAUTH >> 4),
+                                                   &delStaParams);
+                    WLANSAP_DeauthSta(pCtx, &delStaParams);
                     VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO_LOW, "size of accept and deny lists %d %d",
                             pSapCtx->nAcceptMac, pSapCtx->nDenyMac);
                 }
@@ -1344,6 +1350,7 @@ WLANSAP_ModifyACL
                             MAC_ADDR_ARRAY(pPeerStaMac));
                 } else
                 {
+                    struct tagCsrDelStaParams delStaParams;
                     if (staInWhiteList)
                     {
                         //remove it from white list before adding to the black list
@@ -1352,7 +1359,11 @@ WLANSAP_ModifyACL
                         sapRemoveMacFromACL(pSapCtx->acceptMacList, &pSapCtx->nAcceptMac, staWLIndex);
                     }
                     /* If we are adding a client to the black list; if its connected, send deauth */
-                    WLANSAP_DeauthSta(pCtx, pPeerStaMac);
+                    WLANSAP_PopulateDelStaParams(pPeerStaMac,
+                                                 eCsrForcedDeauthSta,
+                                                 (SIR_MAC_MGMT_DEAUTH >> 4),
+                                                 &delStaParams);
+                    WLANSAP_DeauthSta(pCtx, &delStaParams);
                     VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
                             "... Now add to black list");
                     sapAddMacToACL(pSapCtx->denyMacList, &pSapCtx->nDenyMac, pPeerStaMac);
@@ -1428,7 +1439,7 @@ VOS_STATUS
 WLANSAP_DisassocSta
 (
     v_PVOID_t pCtx,
-    v_U8_t *pPeerStaMac
+    struct tagCsrDelStaParams *pDelStaParams
 )
 {
     ptSapContext pSapCtx = VOS_GET_SAP_CB(pCtx);
@@ -1445,7 +1456,7 @@ WLANSAP_DisassocSta
     }
 
     sme_RoamDisconnectSta(VOS_GET_HAL_CB(pSapCtx->pvosGCtx), pSapCtx->sessionId,
-                            pPeerStaMac);
+                            pDelStaParams);
 
     return VOS_STATUS_SUCCESS;
 }
@@ -1466,7 +1477,8 @@ WLANSAP_DisassocSta
                   control block can be extracted from its context
                   When MBSSID feature is enabled, SAP context is directly
                   passed to SAP APIs
-    pPeerStaMac : Mac address of the station to deauthenticate
+    pDelStaParams       : Pointer to parameters of the station to
+                          deauthenticate
 
   RETURN VALUE
     The VOS_STATUS code associated with performing the operation
@@ -1479,7 +1491,7 @@ VOS_STATUS
 WLANSAP_DeauthSta
 (
     v_PVOID_t pCtx,
-    v_U8_t *pPeerStaMac
+    struct tagCsrDelStaParams *pDelStaParams
 )
 {
     eHalStatus halStatus = eHAL_STATUS_FAILURE;
@@ -1497,8 +1509,8 @@ WLANSAP_DeauthSta
         return vosStatus;
     }
 
-    halStatus = sme_RoamDeauthSta(VOS_GET_HAL_CB(pSapCtx->pvosGCtx), pSapCtx->sessionId,
-                            pPeerStaMac);
+    halStatus = sme_RoamDeauthSta(VOS_GET_HAL_CB(pSapCtx->pvosGCtx),
+                                  pSapCtx->sessionId, pDelStaParams);
 
     if (halStatus == eHAL_STATUS_SUCCESS)
     {
@@ -3701,4 +3713,50 @@ WLANSAP_Set_DfsNol(v_PVOID_t pSapCtx, eSapDfsNolType conf)
         (v_PVOID_t) eSAP_STATUS_SUCCESS);
 
     return VOS_STATUS_SUCCESS;
+}
+
+/*==========================================================================
+  FUNCTION    WLANSAP_PopulateDelStaParams
+
+  DESCRIPTION
+  This API is used to populate del station parameters
+  DEPENDENCIES
+  NA.
+
+  PARAMETERS
+  IN
+  mac:           pointer to peer mac address.
+  reason_code:   Reason code for the disassoc/deauth.
+  subtype:       subtype points to either disassoc/deauth frame.
+  pDelStaParams: address where parameters to be populated.
+
+  RETURN VALUE NONE
+
+  SIDE EFFECTS
+============================================================================*/
+void WLANSAP_PopulateDelStaParams(const v_U8_t *mac,
+                                  v_U16_t reason_code,
+                                  v_U8_t subtype,
+                                  struct tagCsrDelStaParams *pDelStaParams)
+{
+        if (NULL == mac)
+            memset(pDelStaParams->peerMacAddr, 0xff, VOS_MAC_ADDR_SIZE);
+        else
+            vos_mem_copy(pDelStaParams->peerMacAddr, mac, VOS_MAC_ADDR_SIZE);
+
+        if (reason_code == 0)
+            pDelStaParams->reason_code = eSIR_MAC_DEAUTH_LEAVING_BSS_REASON;
+        else
+            pDelStaParams->reason_code = reason_code;
+
+        if (subtype == (SIR_MAC_MGMT_DEAUTH >> 4) ||
+            subtype == (SIR_MAC_MGMT_DISASSOC >> 4))
+            pDelStaParams->subtype = subtype;
+        else
+            pDelStaParams->subtype = (SIR_MAC_MGMT_DEAUTH >> 4);
+
+        VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+               FL("Delete STA with RC:%hu subtype:%hhu MAC::" MAC_ADDRESS_STR),
+                   pDelStaParams->reason_code, pDelStaParams->subtype,
+                   MAC_ADDR_ARRAY(pDelStaParams->peerMacAddr));
 }

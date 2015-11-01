@@ -55,7 +55,6 @@
 #endif
 
 #define WMI_MIN_HEAD_ROOM 64
-#define WMI_MAX_LEN_BYTES 2048
 
 #ifdef WMI_INTERFACE_EVENT_LOGGING
 /* WMI commands */
@@ -121,6 +120,19 @@ struct wmi_event_debug wmi_rx_event_log_buffer[WMI_EVENT_DEBUG_MAX_ENTRY];
 static void __wmi_control_rx(struct wmi_unified *wmi_handle, wmi_buf_t evt_buf);
 int wmi_get_host_credits(wmi_unified_t wmi_handle);
 /* WMI buffer APIs */
+
+/**
+ * wmi_get_max_msg_len() - get maximum WMI message length
+ * @wmi_handle: WMI handle.
+ *
+ * This function returns the maximum WMI message length
+ *
+ * Return: maximum WMI message length
+ */
+uint16_t wmi_get_max_msg_len(wmi_unified_t wmi_handle)
+{
+	return wmi_handle->max_msg_len - WMI_MIN_HEAD_ROOM;
+}
 
 wmi_buf_t
 wmi_buf_alloc(wmi_unified_t wmi_handle, u_int16_t len)
@@ -627,6 +639,9 @@ static u_int8_t* get_wmi_cmd_string(WMI_CMD_ID wmi_command)
 		CASE_RETURN_STRING(WMI_PEER_SET_RATE_REPORT_CONDITION_CMDID);
 		CASE_RETURN_STRING(WMI_SOC_SET_PCL_CMDID);
 		CASE_RETURN_STRING(WMI_SOC_SET_HW_MODE_CMDID);
+		CASE_RETURN_STRING(WMI_SOC_SET_DUAL_MAC_CONFIG_CMDID);
+		CASE_RETURN_STRING(WMI_WOW_ENABLE_ICMPV6_NA_FLT_CMDID);
+		CASE_RETURN_STRING(WMI_DIAG_EVENT_LOG_CONFIG_CMDID);
 	}
 	return "Invalid WMI cmd";
 }
@@ -639,6 +654,13 @@ static void recovery_work_handler(struct work_struct *recovery)
 
 static DECLARE_WORK(recovery_work, recovery_work_handler);
 
+#ifdef FEATURE_RUNTIME_PM
+inline bool wmi_get_runtime_pm_inprogress(wmi_unified_t wmi_handle)
+{
+	return adf_os_atomic_read(&wmi_handle->runtime_pm_inprogress);
+}
+#endif
+
 /* WMI command API */
 int wmi_unified_cmd_send(wmi_unified_t wmi_handle, wmi_buf_t buf, int len,
 			 WMI_CMD_ID cmd_id)
@@ -647,15 +669,39 @@ int wmi_unified_cmd_send(wmi_unified_t wmi_handle, wmi_buf_t buf, int len,
 	A_STATUS status;
 	void *vos_context;
 	struct ol_softc *scn;
+	A_UINT16 htc_tag = 0;
+
+	if (wmi_get_runtime_pm_inprogress(wmi_handle))
+		goto skip_suspend_check;
 
 	if (adf_os_atomic_read(&wmi_handle->is_target_suspended) &&
-		( (WMI_WOW_HOSTWAKEUP_FROM_SLEEP_CMDID != cmd_id) &&
-		  (WMI_PDEV_RESUME_CMDID != cmd_id)) ){
-		pr_err("%s: Target is suspended  could not send WMI command\n", __func__);
+			( (WMI_WOW_HOSTWAKEUP_FROM_SLEEP_CMDID != cmd_id) &&
+			  (WMI_PDEV_RESUME_CMDID != cmd_id)) ) {
+		pr_err("%s: Target is suspended  could not send WMI command: %d\n",
+				__func__, cmd_id);
 		VOS_ASSERT(0);
 		return -EBUSY;
+	} else
+		goto dont_tag;
+
+skip_suspend_check:
+	switch(cmd_id) {
+	case WMI_WOW_ENABLE_CMDID:
+	case WMI_PDEV_SUSPEND_CMDID:
+	case WMI_WOW_ENABLE_DISABLE_WAKE_EVENT_CMDID:
+	case WMI_WOW_ADD_WAKE_PATTERN_CMDID:
+	case WMI_WOW_HOSTWAKEUP_FROM_SLEEP_CMDID:
+	case WMI_PDEV_RESUME_CMDID:
+	case WMI_WOW_DEL_WAKE_PATTERN_CMDID:
+#ifdef FEATURE_WLAN_D0WOW
+	case WMI_D0_WOW_ENABLE_DISABLE_CMDID:
+#endif
+		htc_tag = HTC_TX_PACKET_TAG_AUTO_PM;
+	default:
+		break;
 	}
 
+dont_tag:
 	/* Do sanity check on the TLV parameter structure */
 	{
 		void *buf_ptr = (void *) adf_nbuf_data(buf);
@@ -706,7 +752,7 @@ int wmi_unified_cmd_send(wmi_unified_t wmi_handle, wmi_buf_t buf, int len,
 			len + sizeof(WMI_CMD_HDR),
 			/* htt_host_data_dl_len(buf)+20 */
 			wmi_handle->wmi_endpoint_id,
-			0/*htc_tag*/);
+			htc_tag);
 
 	SET_HTC_PACKET_NET_BUF_CONTEXT(pkt, buf);
 
@@ -833,18 +879,10 @@ void wmi_control_rx(void *ctx, HTC_PACKET *htc_packet)
 {
 	struct wmi_unified *wmi_handle = (struct wmi_unified *)ctx;
 	wmi_buf_t evt_buf;
-
-#ifndef QCA_CONFIG_SMP
-	/* MDM is single core apps processor
-	 * As a result, PAUSE event cannot be processed fast enough
-	 * if RX process reserve CPU
-	 * To ensure PAUSE event processed fast enough
-	 * only PAUSE event should not be scheduled on worker thread */
 	u_int32_t len;
 	void *wmi_cmd_struct_ptr = NULL;
 	u_int32_t idx = 0;
 	int tlv_ok_status = 0;
-#endif /* QCA_CONFIG_SMP */
 
 #if  defined(WMI_INTERFACE_EVENT_LOGGING) || !defined(QCA_CONFIG_SMP)
 	u_int32_t id;
@@ -852,10 +890,10 @@ void wmi_control_rx(void *ctx, HTC_PACKET *htc_packet)
 #endif
 
 	evt_buf = (wmi_buf_t) htc_packet->pPktContext;
-#ifndef QCA_CONFIG_SMP
 	id = WMI_GET_FIELD(adf_nbuf_data(evt_buf), WMI_CMD_HDR, COMMANDID);
 	/* TX_PAUSE EVENT should be handled with tasklet context */
-	if (WMI_TX_PAUSE_EVENTID == id) {
+	if ((WMI_TX_PAUSE_EVENTID == id) ||
+		(WMI_WOW_WAKEUP_HOST_EVENTID == id)) {
 		if (adf_nbuf_pull_head(evt_buf, sizeof(WMI_CMD_HDR)) == NULL)
 			return;
 
@@ -886,7 +924,6 @@ void wmi_control_rx(void *ctx, HTC_PACKET *htc_packet)
 		adf_nbuf_free(evt_buf);
 		return;
 	}
-#endif /* QCA_CONFIG_SMP */
 
 #ifdef WMI_INTERFACE_EVENT_LOGGING
 	id = WMI_GET_FIELD(adf_nbuf_data(evt_buf), WMI_CMD_HDR, COMMANDID);
@@ -930,7 +967,7 @@ void __wmi_control_rx(struct wmi_unified *wmi_handle, wmi_buf_t evt_buf)
 	}
 
 #ifdef FEATURE_WLAN_D0WOW
-	if (wmi_handle->in_d0wow)
+	if (wmi_get_d0wow_flag(wmi_handle))
 		pr_debug("%s: WMI event ID is 0x%x\n", __func__, id);
 #endif
 
@@ -1014,6 +1051,9 @@ wmi_unified_attach(ol_scn_t scn_handle, wma_wow_tx_complete_cbk func)
     wmi_handle->scn_handle = scn_handle;
     adf_os_atomic_init(&wmi_handle->pending_cmds);
     adf_os_atomic_init(&wmi_handle->is_target_suspended);
+#ifdef FEATURE_RUNTIME_PM
+    adf_os_atomic_init(&wmi_handle->runtime_pm_inprogress);
+#endif
     adf_os_spinlock_init(&wmi_handle->eventq_lock);
     adf_nbuf_queue_init(&wmi_handle->event_queue);
 #ifdef CONFIG_CNSS
@@ -1045,6 +1085,36 @@ wmi_unified_detach(struct wmi_unified* wmi_handle)
         OS_FREE(wmi_handle);
         wmi_handle = NULL;
     }
+}
+
+/**
+ * wmi_unified_remove_work() - detach for WMI work
+ * @wmi_handle: handle to WMI
+ *
+ * A function that does not fully detach WMI, but just remove work
+ * queue items associated with it. This is used to make sure that
+ * before any other processing code that may destroy related contexts
+ * (HTC, etc), work queue processing on WMI has already been stopped.
+ *
+ * Return: void.
+ */
+void
+wmi_unified_remove_work(struct wmi_unified* wmi_handle)
+{
+	wmi_buf_t buf;
+
+	VOS_TRACE( VOS_MODULE_ID_WDA, VOS_TRACE_LEVEL_INFO,
+		"Enter: %s", __func__);
+	vos_flush_work(&wmi_handle->rx_event_work);
+	adf_os_spin_lock_bh(&wmi_handle->eventq_lock);
+	buf = adf_nbuf_queue_remove(&wmi_handle->event_queue);
+	while (buf) {
+		adf_nbuf_free(buf);
+		buf = adf_nbuf_queue_remove(&wmi_handle->event_queue);
+	}
+	adf_os_spin_unlock_bh(&wmi_handle->eventq_lock);
+	VOS_TRACE( VOS_MODULE_ID_WDA, VOS_TRACE_LEVEL_INFO,
+		"Done: %s", __func__);
 }
 
 void wmi_htc_tx_complete(void *ctx, HTC_PACKET *htc_pkt)
@@ -1127,9 +1197,29 @@ void wmi_set_target_suspend(wmi_unified_t wmi_handle, A_BOOL val)
 	adf_os_atomic_set(&wmi_handle->is_target_suspended, val);
 }
 
+#ifdef FEATURE_RUNTIME_PM
+void wmi_set_runtime_pm_inprogress(wmi_unified_t wmi_handle, A_BOOL val)
+{
+	adf_os_atomic_set(&wmi_handle->runtime_pm_inprogress, val);
+}
+#endif
+
 #ifdef FEATURE_WLAN_D0WOW
 void wmi_set_d0wow_flag(wmi_unified_t wmi_handle, A_BOOL flag)
 {
-	wmi_handle->in_d0wow = flag;
+	tp_wma_handle wma = wmi_handle->scn_handle;
+	struct ol_softc *scn =
+		vos_get_context(VOS_MODULE_ID_HIF, wma->vos_context);
+
+	adf_os_atomic_set(&scn->hif_sc->in_d0wow, flag);
+}
+
+A_BOOL wmi_get_d0wow_flag(wmi_unified_t wmi_handle)
+{
+	tp_wma_handle wma = wmi_handle->scn_handle;
+	struct ol_softc *scn =
+		vos_get_context(VOS_MODULE_ID_HIF, wma->vos_context);
+
+	return adf_os_atomic_read(&scn->hif_sc->in_d0wow);
 }
 #endif
