@@ -296,7 +296,7 @@ int limProcessFTPreAuthReq(tpAniSirGlobal pMac, tpSirMsgQ pMsg)
     psessionEntry->ftPEContext.pFTPreAuthReq = ftPreAuthReq;
 
 #if defined WLAN_FEATURE_VOWIFI_11R_DEBUG
-    PELOGE(limLog( pMac, LOG1, FL("PE Auth ft_ies_length=%02x%02x%02x"),
+    PELOGE(limLog( pMac, LOG1, FL("PRE Auth ft_ies_length=%02x%02x%02x"),
         psessionEntry->ftPEContext.pFTPreAuthReq->ft_ies[0],
         psessionEntry->ftPEContext.pFTPreAuthReq->ft_ies[1],
         psessionEntry->ftPEContext.pFTPreAuthReq->ft_ies[2]);)
@@ -403,10 +403,14 @@ void limPerformFTPreAuth(tpAniSirGlobal pMac, eHalStatus status,
 #if defined WLAN_FEATURE_VOWIFI_11R_DEBUG
     PELOG1(limLog( pMac, LOG1, FL("FT Auth Rsp Timer Started"));)
 #endif
+#ifdef FEATURE_WLAN_DIAG_SUPPORT
+        limDiagEventReport(pMac, WLAN_PE_DIAG_ROAM_AUTH_START_EVENT,
+                           pMac->lim.pSessionEntry, eSIR_SUCCESS, eSIR_SUCCESS);
+#endif
 
     limSendAuthMgmtFrame(pMac, &authFrame,
         psessionEntry->ftPEContext.pFTPreAuthReq->preAuthbssId,
-        LIM_NO_WEP_IN_FC, psessionEntry);
+        LIM_NO_WEP_IN_FC, psessionEntry, eSIR_FALSE);
     return;
 
 preauth_fail:
@@ -1183,7 +1187,7 @@ void limHandleFTPreAuthRsp(tpAniSirGlobal pMac, tSirRetStatus status,
     tpPESession      pftSessionEntry = NULL;
     tANI_U8 sessionId = 0;
     tpSirBssDescription  pbssDescription = NULL;
-#ifdef FEATURE_WLAN_DIAG_SUPPORT_LIM
+#ifdef FEATURE_WLAN_DIAG_SUPPORT
    limDiagEventReport(pMac, WLAN_PE_DIAG_PRE_AUTH_RSP_EVENT,
          psessionEntry, (tANI_U16)status, 0);
 #endif

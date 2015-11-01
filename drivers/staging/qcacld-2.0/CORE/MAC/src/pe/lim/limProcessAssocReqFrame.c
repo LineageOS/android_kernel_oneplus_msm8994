@@ -248,6 +248,7 @@ limProcessAssocReqFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo,
     tANI_U32 retryInterval;
 #endif
     bool assoc_req_copied = false;
+    tANI_U16 assocId = 0;
 
     limGetPhyMode(pMac, &phyMode, psessionEntry);
 
@@ -262,8 +263,6 @@ limProcessAssocReqFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo,
           psessionEntry->peSessionId, psessionEntry->limSystemRole,
           psessionEntry->limMlmState, MAC_ADDR_ARRAY(pHdr->sa));
 
-   lim_check_sta_in_pe_entries(pMac, pHdr);
-
    if (psessionEntry->limSystemRole == eLIM_STA_ROLE || psessionEntry->limSystemRole == eLIM_BT_AMP_STA_ROLE )
    {
         limLog(pMac, LOGE, FL("received unexpected ASSOC REQ on sessionid: %d "
@@ -274,6 +273,30 @@ limProcessAssocReqFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo,
         WDA_GET_RX_MPDU_DATA(pRxPacketInfo), framelen);
         return;
     }
+
+    /*
+     * If a STA is already present in DPH and it
+     * is initiating a Assoc re-transmit, do not
+     * process it. This can happen when first Assoc Req frame
+     * is received but ACK lost at STA side. The ACK for this
+     * dropped Assoc Req frame should be sent by HW. Host simply
+     * does not process it once the entry for the STA is already
+     * present in DPH.
+     */
+    pStaDs = dphLookupHashEntry(pMac, pHdr->sa, &assocId,
+                            &psessionEntry->dph.dphHashTable);
+    if ((NULL != pStaDs) && (pHdr->fc.retry > 0))
+    {
+        limLog(pMac, LOGE,
+           FL("STA is initiating Assoc Req after ACK lost.So, do not Process"
+           "sessionid: %d sys subType=%d for role=%d from: "MAC_ADDRESS_STR),
+           psessionEntry->peSessionId,
+           subType, psessionEntry->limSystemRole, MAC_ADDR_ARRAY(pHdr->sa));
+
+        return;
+    }
+
+    lim_check_sta_in_pe_entries(pMac, pHdr);
 
     // Get pointer to Re/Association Request frame body
     pBody = WDA_GET_RX_MPDU_DATA(pRxPacketInfo);
@@ -1385,6 +1408,9 @@ if (limPopulateMatchingRateSet(pMac,
     // Re/Assoc Response frame to requesting STA
     pStaDs->mlmStaContext.subType = subType;
 
+    if (pAssocReq->propIEinfo.aniIndicator)
+        pStaDs->aniPeer = 1;
+
 #ifdef WLAN_FEATURE_11W
     pStaDs->rmfEnabled = (pmfConnection) ? 1 : 0;
     pStaDs->pmfSaQueryState = DPH_SA_QUERY_NOT_IN_PROGRESS;
@@ -1420,19 +1446,8 @@ if (limPopulateMatchingRateSet(pMac,
 
     if (pAssocReq->ExtCap.present)
     {
-        struct s_ext_cap *p_ext_cap = (struct s_ext_cap *)
-                                       pAssocReq->ExtCap.bytes;
-        pStaDs->timingMeasCap = 0;
-        pStaDs->timingMeasCap |= (p_ext_cap->timingMeas)?
-                                  RTT_TIMING_MEAS_CAPABILITY:
-                                  RTT_INVALID;
-        pStaDs->timingMeasCap |= (p_ext_cap->fineTimingMeas)?
-                                  RTT_FINE_TIMING_MEAS_CAPABILITY:
-                                  RTT_INVALID;
-        PELOG1(limLog(pMac, LOG1,
-               FL("ExtCap present, timingMeas: %d fineTimingMeas: %d"),
-               p_ext_cap->timingMeas,
-               p_ext_cap->fineTimingMeas);)
+        lim_set_stads_rtt_cap(pStaDs,
+                (struct s_ext_cap *) pAssocReq->ExtCap.bytes);
     }
     else
     {
@@ -1833,6 +1848,9 @@ void limSendMlmAssocInd(tpAniSirGlobal pMac, tpDphHashNode pStaDs, tpPESession p
         pMlmReassocInd->authType = pStaDs->mlmStaContext.authType;
         vos_mem_copy((tANI_U8 *)&pMlmReassocInd->ssId,
                      (tANI_U8 *)&(pAssocReq->ssId), pAssocReq->ssId.length + 1);
+
+        if (pAssocReq->propIEinfo.aniIndicator)
+            pStaDs->aniPeer = 1;
 
         pMlmReassocInd->capabilityInfo = pAssocReq->capabilityInfo;
         pMlmReassocInd->rsnIE.length = 0;

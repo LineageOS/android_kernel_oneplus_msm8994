@@ -407,7 +407,7 @@ static v_VOID_t wlan_hdd_tdls_discovery_timeout_peer_cb(v_PVOID_t userData)
                 mutex_unlock(&pHddCtx->tdls_lock);
                 wlan_hdd_tdls_set_peer_link_status(tmp,
                                                    eTDLS_LINK_IDLE,
-                                                   eTDLS_LINK_UNSPECIFIED);
+                                                   eTDLS_LINK_NOT_SUPPORTED);
                 mutex_lock(&pHddCtx->tdls_lock);
             }
         }
@@ -509,10 +509,10 @@ int wlan_hdd_tdls_init(hdd_adapter_t *pAdapter)
     {
         pHddCtx->tdls_mode = eTDLS_SUPPORT_NOT_ENABLED;
         pAdapter->sessionCtx.station.pHddTdlsCtx = NULL;
+        mutex_unlock(&pHddCtx->tdls_lock);
         hddLog(VOS_TRACE_LEVEL_ERROR,
                "%s TDLS not enabled (%d) or FW doesn't support",
                __func__, pHddCtx->cfg_ini->fEnableTDLSSupport);
-        mutex_unlock(&pHddCtx->tdls_lock);
         return 0;
     }
     /* TDLS is supported only in STA / P2P Client modes,
@@ -541,9 +541,9 @@ int wlan_hdd_tdls_init(hdd_adapter_t *pAdapter)
         pHddTdlsCtx = vos_mem_malloc(sizeof(tdlsCtx_t));
 
         if (NULL == pHddTdlsCtx) {
-            hddLog(VOS_TRACE_LEVEL_ERROR, "%s malloc failed!", __func__);
             pAdapter->sessionCtx.station.pHddTdlsCtx = NULL;
             mutex_unlock(&pHddCtx->tdls_lock);
+            hddLog(VOS_TRACE_LEVEL_ERROR, "%s malloc failed!", __func__);
             return -1;
         }
         /* initialize TDLS pAdater context */
@@ -935,12 +935,10 @@ hddTdlsPeer_t *wlan_hdd_tdls_get_peer(hdd_adapter_t *pAdapter, u8 *mac)
 
     pHddTdlsCtx = WLAN_HDD_GET_TDLS_CTX_PTR(pAdapter);
 
-    if (NULL == pHddTdlsCtx)
-    {
-        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
-                  FL("pHddTdlsCtx is NULL"));
+    if (NULL == pHddTdlsCtx) {
         vos_mem_free(peer);
         mutex_unlock(&pHddCtx->tdls_lock);
+        hddLog(LOG1, FL("pHddTdlsCtx is NULL"));
         return NULL;
     }
 
@@ -2065,9 +2063,9 @@ void wlan_hdd_tdls_disconnection_callback(hdd_adapter_t *pAdapter)
 
     if (NULL == pHddTdlsCtx)
     {
+       mutex_unlock(&pHddCtx->tdls_lock);
        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
                 FL("pHddTdlsCtx is NULL"));
-        mutex_unlock(&pHddCtx->tdls_lock);
         return;
     }
     pHddTdlsCtx->discovery_sent_cnt = 0;
@@ -2880,7 +2878,7 @@ void wlan_hdd_tdls_indicate_teardown(hdd_adapter_t *pAdapter,
 
     wlan_hdd_tdls_set_peer_link_status(curr_peer,
                                        eTDLS_LINK_TEARING,
-                                       eTDLS_LINK_DROPPED_BY_REMOTE);
+                                       eTDLS_LINK_UNSPECIFIED);
     cfg80211_tdls_oper_request(pAdapter->dev,
                                curr_peer->peerMac,
                                NL80211_TDLS_TEARDOWN,
@@ -2918,18 +2916,18 @@ void wlan_hdd_tdls_get_wifi_hal_state(hddTdlsPeer_t *curr_peer,
     switch(curr_peer->link_status)
     {
         case eTDLS_LINK_IDLE:
-        case eTDLS_LINK_DISCOVERING:
         case eTDLS_LINK_DISCOVERED:
-            *state = WIFI_TDLS_ENABLED;
+            *state = QCA_WIFI_HAL_TDLS_ENABLED;
             break;
+        case eTDLS_LINK_DISCOVERING:
         case eTDLS_LINK_CONNECTING:
-            *state = WIFI_TDLS_TRYING;
+            *state = QCA_WIFI_HAL_TDLS_ENABLED;
             break;
         case eTDLS_LINK_CONNECTED:
-            *state = WIFI_TDLS_ESTABLISHED;
+            *state = QCA_WIFI_HAL_TDLS_ESTABLISHED;
             break;
         case eTDLS_LINK_TEARING:
-            *state = WIFI_TDLS_DROPPED;
+            *state = QCA_WIFI_HAL_TDLS_DROPPED;
             break;
     }
 }
@@ -2940,16 +2938,25 @@ int wlan_hdd_tdls_get_status(hdd_adapter_t *pAdapter,
                              tANI_S32 *reason)
 {
     hddTdlsPeer_t *curr_peer;
+    hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
 
     curr_peer = wlan_hdd_tdls_find_peer(pAdapter, mac, TRUE);
-    if (curr_peer == NULL)
-    {
+    if (curr_peer == NULL) {
        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
                  FL("curr_peer is NULL"));
-       return -EINVAL;
+        *state = QCA_WIFI_HAL_TDLS_DISABLED;
+        *reason = eTDLS_LINK_UNSPECIFIED;
+    } else {
+        if (pHddCtx->cfg_ini->fTDLSExternalControl &&
+           (FALSE == curr_peer->isForcedPeer)) {
+            VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                      FL("curr_peer is not Forced"));
+            *state = QCA_WIFI_HAL_TDLS_DISABLED;
+            *reason = eTDLS_LINK_UNSPECIFIED;
+        } else {
+            wlan_hdd_tdls_get_wifi_hal_state(curr_peer, state, reason);
+        }
     }
-
-    wlan_hdd_tdls_get_wifi_hal_state(curr_peer, state, reason);
     return (0);
 }
 

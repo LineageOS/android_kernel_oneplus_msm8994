@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -346,7 +346,21 @@ typedef struct _VosMsgWrapper
 
 } VosMsgWrapper, *pVosMsgWrapper;
 
-
+/**
+ * struct vos_log_complete - Log completion internal structure
+ * @is_fatal: Type is fatal or not
+ * @indicator: Source of bug report
+ * @reason_code: Reason code for bug report
+ * @is_report_in_progress: If bug report is in progress
+ *
+ * This structure internally stores the log related params
+ */
+struct vos_log_complete {
+	uint32_t is_fatal;
+	uint32_t indicator;
+	uint32_t reason_code;
+	bool is_report_in_progress;
+};
 
 typedef struct _VosContextType
 {
@@ -414,6 +428,15 @@ typedef struct _VosContextType
    /* SSR re-init in progress */
    volatile v_U8_t     isReInitInProgress;
 
+   bool is_wakelock_log_enabled;
+   uint32_t wakelock_log_level;
+   uint32_t connectivity_log_level;
+   uint32_t packet_stats_log_level;
+   uint32_t driver_debug_log_level;
+   uint32_t fw_debug_log_level;
+
+   struct vos_log_complete log_complete;
+   vos_spin_lock_t bug_report_lock;
 } VosContextType, *pVosContextType;
 
 
@@ -652,6 +675,7 @@ void vos_ssr_protect_init(void);
 void vos_ssr_protect(const char *caller_func);
 void vos_ssr_unprotect(const char *caller_func);
 bool vos_is_ssr_ready(const char *caller_func);
+int vos_get_gfp_flags(void);
 
 #define vos_wait_for_work_thread_completion(func) vos_is_ssr_ready(func)
 

@@ -142,8 +142,17 @@ void pe_reset_protection_callback(void *ptr)
     vos_mem_zero(&pe_session_entry->beaconParams,
                  sizeof(pe_session_entry->beaconParams));
 
+    vos_mem_zero(&mac_ctx->lim.gLimOverlap11gParams,
+                 sizeof(mac_ctx->lim.gLimOverlap11gParams));
+    vos_mem_zero(&mac_ctx->lim.gLimOverlap11aParams,
+                 sizeof(mac_ctx->lim.gLimOverlap11aParams));
+    vos_mem_zero(&mac_ctx->lim.gLimOverlapHt20Params,
+                 sizeof(mac_ctx->lim.gLimOverlapHt20Params));
+    vos_mem_zero(&mac_ctx->lim.gLimOverlapNonGfParams,
+                 sizeof(mac_ctx->lim.gLimOverlapNonGfParams));
+
     /* index 0, is self node, peers start from 1 */
-    for(i = 1 ; i < mac_ctx->lim.gLimAssocStaLimit ; i++)
+    for(i = 1 ; i <= mac_ctx->lim.gLimAssocStaLimit ; i++)
     {
         station_hash_node = dphGetHashEntry(mac_ctx, i,
                               &pe_session_entry->dph.dphHashTable);
@@ -156,7 +165,7 @@ void pe_reset_protection_callback(void *ptr)
     if ((current_protection_state != pe_session_entry->old_protection_state) &&
         (VOS_FALSE == mac_ctx->sap.SapDfsInfo.is_dfs_cac_timer_running)) {
         VOS_TRACE(VOS_MODULE_ID_PE,
-                  VOS_TRACE_LEVEL_INFO,
+                  VOS_TRACE_LEVEL_ERROR,
                   FL("protection changed, update beacon template\n"));
         /* update beacon fix params and send update to FW */
         vos_mem_zero(&beacon_params, sizeof(tUpdateBeaconParams));
@@ -310,6 +319,7 @@ tpPESession peCreateSession(tpAniSirGlobal pMac,
                MAC_ADDRESS_STR " Max No. of STA %d",
                pMac->lim.gpSession[i].peSessionId,
                MAC_ADDR_ARRAY(bssid), numSta);
+            pMac->lim.gpSession[i].roaming_in_progress = false;
 
             /* Initialize PMM Ps Offload Module */
             if(pMac->psOffloadEnabled)

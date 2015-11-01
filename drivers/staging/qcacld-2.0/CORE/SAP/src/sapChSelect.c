@@ -643,7 +643,7 @@ v_BOOL_t sapChanSelInit(tHalHandle halHandle,
     // Fill the channel number in the spectrum in the operating freq band
     for (channelnum = 0;
             channelnum < pSpectInfoParams->numSpectChans;
-                channelnum++, pChans++) {
+                channelnum++, pChans++, pSpectCh++) {
         chSafe = VOS_TRUE;
 
         /* check if the channel is in NOL blacklist */
@@ -693,7 +693,6 @@ v_BOOL_t sapChanSelInit(tHalHandle halHandle,
             pSpectCh->valid = eSAP_TRUE;
             pSpectCh->rssiAgr = SOFTAP_MIN_RSSI;// Initialise for all channels
             pSpectCh->channelWidth = SOFTAP_HT20_CHANNELWIDTH; // Initialise 20MHz for all the Channels
-            pSpectCh++;
         }
     }
     return eSAP_TRUE;
@@ -741,8 +740,6 @@ v_U32_t sapweightRssiCount(v_S7_t rssi, v_U16_t count)
 
     if(countWeight > SOFTAP_COUNT_WEIGHT)
         countWeight = SOFTAP_COUNT_WEIGHT;
-    else if (countWeight < 0)
-        countWeight = 0;
 
     rssicountWeight =  rssiWeight + countWeight;
 

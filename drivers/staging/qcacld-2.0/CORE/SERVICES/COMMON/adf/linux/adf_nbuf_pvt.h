@@ -75,7 +75,12 @@ struct cvg_nbuf_cb {
      * decremented, and ultimately freed once all the segments have been
      * freed.
      */
-    struct sk_buff *parent;
+    union {
+        struct sk_buff *parent;
+#ifdef DEBUG_RX_RING_BUFFER
+        uint32_t map_index;
+#endif
+    } txrx_field;
 
     /*
      * Store the DMA mapping info for the network buffer fragments
@@ -118,6 +123,12 @@ struct cvg_nbuf_cb {
     unsigned char tx_htt2_reserved: 7;
 #endif /* QCA_TX_HTT2_SUPPORT */
 };
+
+#ifdef DEBUG_RX_RING_BUFFER
+#define NBUF_MAP_ID(skb) \
+    (((struct cvg_nbuf_cb *)((skb)->cb))->txrx_field.map_index)
+#endif
+
 #define NBUF_OWNER_ID(skb) \
     (((struct cvg_nbuf_cb *)((skb)->cb))->owner_id)
 #ifdef IPA_OFFLOAD

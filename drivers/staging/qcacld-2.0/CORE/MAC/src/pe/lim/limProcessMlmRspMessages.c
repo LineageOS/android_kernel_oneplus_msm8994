@@ -542,6 +542,12 @@ limSendMlmAssocReq( tpAniSirGlobal pMac,
     PELOG1(limLog(pMac, LOG1, FL("SessionId:%d Authenticated with BSS"),
            psessionEntry->peSessionId);)
 
+    if (NULL == psessionEntry->pLimJoinReq) {
+        limLog(pMac, LOGE, FL("Join Request is NULL."));
+        /* No need to Assert. JOIN timeout will handle this error */
+        return;
+    }
+
     pMlmAssocReq = vos_mem_malloc(sizeof(tLimMlmAssocReq));
     if ( NULL == pMlmAssocReq ) {
         limLog(pMac, LOGP, FL("call to AllocateMemory failed for mlmAssocReq"));
@@ -634,6 +640,10 @@ limSendMlmAssocReq( tpAniSirGlobal pMac,
         }
     }
 
+#ifdef FEATURE_WLAN_DIAG_SUPPORT
+    limDiagEventReport(pMac, WLAN_PE_DIAG_ASSOC_REQ_EVENT, psessionEntry,
+                       eSIR_SUCCESS, eSIR_SUCCESS);
+#endif
     pMlmAssocReq->listenInterval = (tANI_U16)val;
     /* Update PE session ID*/
     pMlmAssocReq->sessionId = psessionEntry->peSessionId;
@@ -1566,9 +1576,9 @@ limProcessMlmDeauthCnf(tpAniSirGlobal pMac, tANI_U32 *pMsgBuf)
     if ((psessionEntry->limSystemRole == eLIM_STA_ROLE)|| (psessionEntry->limSystemRole == eLIM_BT_AMP_STA_ROLE))
     {
         // Deauth Confirm from MLM
-        if (psessionEntry->limSmeState != eLIM_SME_WT_DEAUTH_STATE)
-        {
-            /**
+        if ((psessionEntry->limSmeState != eLIM_SME_WT_DISASSOC_STATE) &&
+            (psessionEntry->limSmeState != eLIM_SME_WT_DEAUTH_STATE)) {
+            /*
              * Should not have received Deauth confirm
              * from MLM in other states.
              * Log error
@@ -3007,7 +3017,7 @@ limProcessStaMlmAddBssRspFT(tpAniSirGlobal pMac, tpSirMsgQ limMsgQ, tpPESession 
          * TQ STA will do Greenfield only with TQ AP, for
          * everybody else it will be turned off.
          */
-        if( (psessionEntry->pLimJoinReq != NULL))
+        if( (psessionEntry->pLimJoinReq != NULL) && (!psessionEntry->pLimJoinReq->bssDescription.aniIndicator))
         {
             limLog( pMac, LOGE, FL(" Turning off Greenfield, when adding self entry"));
             pAddStaParams->greenFieldCapable = WNI_CFG_GREENFIELD_CAPABILITY_DISABLE;
@@ -3832,12 +3842,55 @@ static void limProcessSwitchChannelJoinReq(tpAniSirGlobal pMac, tpPESession pses
         }
     }
 
+    psessionEntry->limPrevMlmState = psessionEntry->limMlmState;
+    psessionEntry->limMlmState = eLIM_MLM_WT_JOIN_BEACON_STATE;
+    MTRACE(macTrace(pMac, TRACE_CODE_MLM_STATE,
+        psessionEntry->peSessionId, psessionEntry->limMlmState));
+
+    limLog(pMac, LOG1,
+        FL("Sessionid %d prev lim state %d new lim state %d systemrole %d"),
+        psessionEntry->peSessionId,
+        psessionEntry->limPrevMlmState,
+        psessionEntry->limMlmState, GET_LIM_SYSTEM_ROLE(psessionEntry));
+
     /* Update the lim global gLimTriggerBackgroundScanDuringQuietBss */
     if(wlan_cfgGetInt(pMac, WNI_CFG_TRIG_STA_BK_SCAN, &val) != eSIR_SUCCESS)
         limLog(pMac, LOGP, FL("failed to get WNI_CFG_TRIG_STA_BK_SCAN cfg value!"));
     pMac->lim.gLimTriggerBackgroundScanDuringQuietBss = (val) ? 1 : 0;
-    // Apply previously set configuration at HW
+    /* Apply previously set configuration at HW */
     limApplyConfiguration(pMac, psessionEntry);
+
+    /*
+     * If sendDeauthBeforeCon is enabled, Send Deauth first to AP if last
+     * disconnection was caused by HB failure.
+     */
+    if(pMac->roam.configParam.sendDeauthBeforeCon)
+    {
+       int apCount;
+
+       for(apCount = 0; apCount < 2; apCount++)
+       {
+
+           if (vos_mem_compare(psessionEntry->pLimMlmJoinReq->bssDescription.bssId,
+                    pMac->lim.gLimHeartBeatApMac[apCount], sizeof(tSirMacAddr)))
+           {
+               limLog(pMac, LOGE, FL("Index %d Sessionid: %d Send deauth on "
+                 "channel %d to BSSID: "MAC_ADDRESS_STR ), apCount,
+                 psessionEntry->peSessionId, psessionEntry->currentOperChannel,
+                 MAC_ADDR_ARRAY(psessionEntry->pLimMlmJoinReq->bssDescription.
+                                                                      bssId));
+
+               limSendDeauthMgmtFrame( pMac, eSIR_MAC_UNSPEC_FAILURE_REASON,
+                     psessionEntry->pLimMlmJoinReq->bssDescription.bssId,
+                     psessionEntry, FALSE );
+
+               vos_mem_zero(pMac->lim.gLimHeartBeatApMac[apCount],
+                       sizeof(tSirMacAddr));
+               break;
+           }
+       }
+    }
+
     /// Wait for Beacon to announce join success
     vos_mem_copy(ssId.ssId,
                  psessionEntry->ssId.ssId,
@@ -3846,11 +3899,11 @@ static void limProcessSwitchChannelJoinReq(tpAniSirGlobal pMac, tpPESession pses
 
     limDeactivateAndChangeTimer(pMac, eLIM_PERIODIC_JOIN_PROBE_REQ_TIMER);
 
-    //assign appropriate sessionId to the timer object
+    /* assign appropriate sessionId to the timer object */
     pMac->lim.limTimers.gLimPeriodicJoinProbeReqTimer.sessionId = psessionEntry->peSessionId;
-    limLog(pMac, LOG1, FL("Sessionid: %d Send Probe req on channel %d ssid: %s "
-        "BSSID: "MAC_ADDRESS_STR), psessionEntry->peSessionId,
-         psessionEntry->currentOperChannel, ssId.ssId,
+    limLog(pMac, LOG1, FL("Sessionid: %d Send Probe req on channel %d ssid:%.*s"
+            "BSSID: "MAC_ADDRESS_STR), psessionEntry->peSessionId,
+            psessionEntry->currentOperChannel, ssId.length, ssId.ssId,
          MAC_ADDR_ARRAY(psessionEntry->pLimMlmJoinReq->bssDescription.bssId));
 
     /*

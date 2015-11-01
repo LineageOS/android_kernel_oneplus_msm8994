@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -69,7 +69,8 @@ typedef struct
    u_int8_t  scan:1;
    u_int8_t  dpuFeedback;
    u_int8_t  sessionId;
-   u_int8_t  scan_src:1;
+   u_int8_t  scan_src;
+   u_int32_t tsf_delta;
    u_int32_t rssi_raw;
 }t_packetmeta, *tp_packetmeta;
 

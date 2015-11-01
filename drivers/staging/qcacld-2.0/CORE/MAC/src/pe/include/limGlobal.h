@@ -453,6 +453,7 @@ struct tLimIbssPeerNode
 {
     tLimIbssPeerNode         *next;
     tSirMacAddr              peerMacAddr;
+    tANI_U8                       aniIndicator:1;
     tANI_U8                       extendedRatesPresent:1;
     tANI_U8                       edcaPresent:1;
     tANI_U8                       wmeEdcaPresent:1;

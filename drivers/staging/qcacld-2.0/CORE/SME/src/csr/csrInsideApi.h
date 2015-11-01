@@ -96,11 +96,12 @@
 #define CSR_BEST_RSSI_VALUE         (-30)   //RSSI >= this is in CAT4
 #define CSR_DEFAULT_RSSI_DB_GAP     30 //every 30 dbm for one category
 #define CSR_BSS_CAP_VALUE_NONE  0    //not much value
-#define CSR_BSS_CAP_VALUE_HT    2
+#define CSR_BSS_CAP_VALUE_HT    1
+#define CSR_BSS_CAP_VALUE_VHT   2
 #define CSR_BSS_CAP_VALUE_WMM   1
 #define CSR_BSS_CAP_VALUE_UAPSD 1
 #if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_ESE) || defined(FEATURE_WLAN_LFR)
-#define CSR_BSS_CAP_VALUE_5GHZ  1
+#define CSR_BSS_CAP_VALUE_5GHZ  2
 #endif
 #define CSR_DEFAULT_ROAMING_TIME 10   //10 seconds
 #define CSR_ROAM_MIN(X, Y)  ((X) < (Y) ? (X) : (Y))
@@ -195,6 +196,8 @@ typedef struct
 #define CSR_IS_BETTER_PREFER_VALUE(v1, v2)   ((v1) > (v2))
 #define CSR_IS_EQUAL_PREFER_VALUE(v1, v2)   ((v1) == (v2))
 #define CSR_IS_BETTER_CAP_VALUE(v1, v2)     ((v1) > (v2))
+#define CSR_IS_EQUAL_CAP_VALUE(v1, v2)  ((v1) == (v2))
+#define CSR_IS_BETTER_RSSI(v1, v2)   ((v1) > (v2))
 #define CSR_IS_ENC_TYPE_STATIC( encType ) ( ( eCSR_ENCRYPT_TYPE_NONE == (encType) ) || \
                                             ( eCSR_ENCRYPT_TYPE_WEP40_STATICKEY == (encType) ) || \
                                             ( eCSR_ENCRYPT_TYPE_WEP104_STATICKEY == (encType) ) )
@@ -215,6 +218,9 @@ typedef struct
                                                                         (pCommand)->u.roamCmd.roamReason ) ||\
                                                 ( eCsrForcedDisassocMICFailure ==\
                                                                           (pCommand)->u.roamCmd.roamReason ) ) )
+
+#define CSR_IS_CLOSE_SESSION_COMMAND(pCommand) \
+ ((pCommand)->command == eSmeCommandDelStaSession)
 
 eCsrRoamState csrRoamStateChange( tpAniSirGlobal pMac, eCsrRoamState NewRoamState, tANI_U8 sessionId);
 eHalStatus csrScanningStateMsgProcessor( tpAniSirGlobal pMac, void *pMsgBuf );
@@ -934,23 +940,20 @@ void csrCallRoamingCompletionCallback(tpAniSirGlobal pMac, tCsrRoamSession *pSes
     \param reason - reason code, be one of the tSirMacReasonCodes
     \return eHalStatus
   ---------------------------------------------------------------------------*/
-eHalStatus csrRoamIssueDisassociateStaCmd( tpAniSirGlobal pMac,
-                                           tANI_U32 sessionId,
-                                           tANI_U8 *pPeerMacAddr,
-                                           tANI_U32 reason);
+eHalStatus csrRoamIssueDisassociateStaCmd(tpAniSirGlobal pMac,
+                                          tANI_U32 sessionId,
+                                          struct tagCsrDelStaParams *pDelStaParams);
 
 /* ---------------------------------------------------------------------------
     \fn csrRoamIssueDeauthSta
     \brief csr function that HDD calls to delete a associated station
     \param sessionId    - session Id for Soft AP
-    \param pPeerMacAddr - MAC of associated station to delete
-    \param reason - reason code, be one of the tSirMacReasonCodes
+    \param pDelStaParams- Pointer to parameters of the station to deauthenticate
     \return eHalStatus
   ---------------------------------------------------------------------------*/
 eHalStatus csrRoamIssueDeauthStaCmd( tpAniSirGlobal pMac,
                                      tANI_U32 sessionId,
-                                     tANI_U8 *pPeerMacAddr,
-                                     tANI_U32 reason);
+                                     struct tagCsrDelStaParams *pDelStaParams);
 
 /* ---------------------------------------------------------------------------
     \fn csrRoamIssueTkipCounterMeasures
@@ -1058,3 +1061,5 @@ void csrClearVotesForCountryInfo(tpAniSirGlobal pMac);
 eHalStatus csrSetHT2040Mode(tpAniSirGlobal pMac, tANI_U32 sessionId,
                      ePhyChanBondState cbMode, tANI_BOOLEAN obssEnabled);
 #endif
+eHalStatus csr_prepare_disconnect_command(tpAniSirGlobal mac,
+                                    tANI_U32 session_id, tSmeCmd **sme_cmd);

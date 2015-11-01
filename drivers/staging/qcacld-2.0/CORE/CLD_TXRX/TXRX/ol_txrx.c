@@ -709,6 +709,11 @@ void
 ol_txrx_pdev_detach(ol_txrx_pdev_handle pdev, int force)
 {
     int i;
+    /*checking to ensure txrx pdev structure is not NULL */
+    if (!pdev) {
+        TXRX_PRINT(TXRX_PRINT_LEVEL_ERR, "NULL pdev passed to %s\n", __func__);
+        return;
+    }
     /* preconditions */
     TXRX_ASSERT2(pdev);
 
@@ -1616,6 +1621,29 @@ ol_txrx_peer_find_by_addr(struct ol_txrx_pdev_t *pdev, u_int8_t *peer_mac_addr)
     return peer;
 }
 
+/**
+ * ol_txrx_dump_tx_desc() - dump tx desc info
+ * @pdev_handle: Pointer to pdev handle
+ *
+ * Return: none
+ */
+void ol_txrx_dump_tx_desc(ol_txrx_pdev_handle pdev_handle)
+{
+	struct ol_txrx_pdev_t *pdev = pdev_handle;
+	int total;
+
+	if (ol_cfg_is_high_latency(pdev->ctrl_pdev))
+		total = adf_os_atomic_read(&pdev->orig_target_tx_credit);
+	else
+		total = ol_cfg_target_tx_credit(pdev->ctrl_pdev);
+
+	TXRX_PRINT(TXRX_PRINT_LEVEL_ERR,
+		"Total tx credits %d free_credits %d",
+		total, pdev->tx_desc.num_free);
+
+	return;
+}
+
 int
 ol_txrx_get_tx_pending(ol_txrx_pdev_handle pdev_handle)
 {
@@ -1853,6 +1881,21 @@ ol_txrx_fw_stats_handler(
                     int limit;
 
                     limit = sizeof(struct rx_remote_buffer_mgmt_stats);
+                    if (req->base.copy.byte_limit < limit) {
+                        limit = req->base.copy.byte_limit;
+                    }
+                    buf = req->base.copy.buf + req->offset;
+                    adf_os_mem_copy(buf, stats_data, limit);
+                }
+                break;
+
+            case HTT_DBG_STATS_TXBF_MUSU_NDPA_PKT:
+
+                bytes = sizeof(struct rx_txbf_musu_ndpa_pkts_stats);
+                if (req->base.copy.buf) {
+                    int limit;
+
+                    limit = sizeof(struct rx_txbf_musu_ndpa_pkts_stats);
                     if (req->base.copy.byte_limit < limit) {
                         limit = req->base.copy.byte_limit;
                     }

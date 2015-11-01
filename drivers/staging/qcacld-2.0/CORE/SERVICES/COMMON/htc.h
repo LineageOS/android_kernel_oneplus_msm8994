@@ -127,7 +127,6 @@ typedef PREPACK struct _HTC_FRAME_HDR{
 #define HTC_FLAGS_SEQ_CHECK          (1 << 2) /* seq check on rx side */
 #define HTC_FLAGS_CRC CHECK          (1 << 3) /* CRC check on rx side */
 
-
     /* receive direction */
 #define HTC_FLAGS_RECV_UNUSED_0      (1 << 0)  /* bit 0 unused */
 #define HTC_FLAGS_RECV_TRAILER       (1 << 1)  /* bit 1 trailer data present */

@@ -241,7 +241,8 @@ char *dumpLim( tpAniSirGlobal pMac, char *p, tANI_U32 sessionId)
                               pTemp->peerMacAddr[3],
                               pTemp->peerMacAddr[4],
                               pTemp->peerMacAddr[5]);
-              p += log_sprintf( pMac,p, "  %d,%d        %d  %d  %04X  %d,%d\n",
+              p += log_sprintf( pMac,p, " %d   %d,%d        %d  %d  %04X  %d,%d\n",
+                              pTemp->aniIndicator,
                               pTemp->edcaPresent, pTemp->wmeEdcaPresent,
                               pTemp->wmeInfoPresent,
                               pTemp->htCapable,

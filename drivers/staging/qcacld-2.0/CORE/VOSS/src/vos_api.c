@@ -93,6 +93,8 @@
 #elif defined(HIF_SDIO)
 #include "if_ath_sdio.h"
 #endif
+#include "vos_utils.h"
+#include "wlan_logging_sock_svc.h"
 #include "wma.h"
 
 /*---------------------------------------------------------------------------
@@ -116,6 +118,7 @@ static pVosContextType gpVosContext;
 /* Debug variable to detect MC thread stuck */
 static atomic_t vos_wrapper_empty_count;
 
+static uint8_t vos_multicast_logging;
 /*---------------------------------------------------------------------------
  * Forward declaration
  * ------------------------------------------------------------------------*/
@@ -241,6 +244,18 @@ static inline void vos_fw_hash_check_config(struct ol_softc *scn,
 					hdd_context_t *pHddCtx) { }
 #endif
 
+#ifdef FEATURE_RUNTIME_PM
+static inline void vos_runtime_pm_config(struct ol_softc *scn,
+		hdd_context_t *pHddCtx)
+{
+	scn->enable_runtime_pm = pHddCtx->cfg_ini->runtime_pm;
+	scn->runtime_pm_delay = pHddCtx->cfg_ini->runtime_pm_delay;
+}
+#else
+static inline void vos_runtime_pm_config(struct ol_softc *scn,
+		hdd_context_t *pHddCtx) { }
+#endif
+
 /*---------------------------------------------------------------------------
 
   \brief vos_open() - Open the vOSS Module
@@ -299,6 +314,8 @@ VOS_STATUS vos_open( v_CONTEXT_t *pVosContext, v_SIZE_t hddContextSize )
    /* Initialize the timer module */
    vos_timer_module_init();
 
+   /* Initialize bug reporting structure */
+   vos_init_log_completion();
 
    /* Initialize the probe event */
    if (vos_event_init(&gpVosContext->ProbeEvent) != VOS_STATUS_SUCCESS)
@@ -374,8 +391,10 @@ VOS_STATUS vos_open( v_CONTEXT_t *pVosContext, v_SIZE_t hddContextSize )
 #ifdef WLAN_FEATURE_LPSS
    scn->enablelpasssupport = pHddCtx->cfg_ini->enablelpasssupport;
 #endif
+   scn->enable_self_recovery = pHddCtx->cfg_ini->enableSelfRecovery;
 
    vos_fw_hash_check_config(scn, pHddCtx);
+   vos_runtime_pm_config(scn, pHddCtx);
 
    /* Initialize BMI and Download firmware */
    if (bmi_download_firmware(scn)) {
@@ -462,6 +481,8 @@ VOS_STATUS vos_open( v_CONTEXT_t *pVosContext, v_SIZE_t hddContextSize )
     macOpenParms.ucRxIndRingCount = pHddCtx->cfg_ini->IpaUcRxIndRingCount;
     macOpenParms.ucTxPartitionBase = pHddCtx->cfg_ini->IpaUcTxPartitionBase;
 #endif /* IPA_UC_OFFLOAD */
+
+    macOpenParms.self_gen_frm_pwr = pHddCtx->cfg_ini->self_gen_frm_pwr;
 
    vStatus = WDA_open( gpVosContext, gpVosContext->pHDDContext,
                        hdd_update_tgt_cfg,
@@ -975,6 +996,13 @@ VOS_STATUS vos_close( v_CONTEXT_t vosContext )
 {
   VOS_STATUS vosStatus;
 
+  vosStatus = wma_wmi_work_close( vosContext );
+  if (!VOS_IS_STATUS_SUCCESS(vosStatus)) {
+     VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+         "%s: Failed to close wma_wmi_work", __func__);
+     VOS_ASSERT( VOS_IS_STATUS_SUCCESS( vosStatus ) );
+  }
+
 #ifdef WLAN_BTAMP_FEATURE
   vosStatus = WLANBAP_Close(vosContext);
   if (!VOS_IS_STATUS_SUCCESS(vosStatus))
@@ -1078,6 +1106,8 @@ VOS_STATUS vos_close( v_CONTEXT_t vosContext )
          "%s: failed to destroy ProbeEvent", __func__);
      VOS_ASSERT( VOS_IS_STATUS_SUCCESS( vosStatus ) );
   }
+
+  vos_deinit_log_completion();
 
   return VOS_STATUS_SUCCESS;
 }
@@ -1297,6 +1327,36 @@ void vos_set_logp_in_progress(VOS_MODULE_ID moduleId, v_U8_t value)
       return;
    }
    pHddCtx->isLogpInProgress = value;
+}
+
+/**
+ * vos_is_unload_in_progress() - check if driver unload is in
+ * progress
+ *
+ * @moduleContext: the input module context pointer
+ * @moduleId: the module ID who's context pointer is input in
+ *        moduleContext
+ *
+ * Return: true  - unload in progress
+ *         false - unload not in progress/error
+ */
+
+
+v_BOOL_t vos_is_unload_in_progress(VOS_MODULE_ID moduleId,
+				 v_VOID_t *moduleContext)
+{
+	hdd_context_t *hdd_ctx = NULL;
+
+	if (gpVosContext == NULL) {
+		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+		"%s: global voss context is NULL", __func__);
+		VOS_ASSERT(0);
+		return 0;
+	}
+	hdd_ctx = (hdd_context_t *)vos_get_context(VOS_MODULE_ID_HDD,
+						   gpVosContext);
+
+	return hdd_ctx->isUnloadInProgress;
 }
 
 v_U8_t vos_is_load_unload_in_progress(VOS_MODULE_ID moduleId, v_VOID_t *moduleContext)
@@ -2071,8 +2131,8 @@ vos_fetch_tl_cfg_parms
   pTLConfig->uDelayedTriggerFrmInt = pConfig->DelayedTriggerFrmInt;
   pTLConfig->uMinFramesProcThres = pConfig->MinFramesProcThres;
   pTLConfig->ip_checksum_offload = pConfig->enableIPChecksumOffload;
-  pTLConfig->enable_rxthread = pConfig->enableRxThread;
-
+  pTLConfig->enable_rxthread =
+    (WLAN_HDD_RX_HANDLE_RX_THREAD == pConfig->rxhandle) ? 1 : 0;
 }
 
 v_BOOL_t vos_is_apps_power_collapse_allowed(void* pHddCtx)
@@ -2201,6 +2261,13 @@ VOS_STATUS vos_shutdown(v_CONTEXT_t vosContext)
                 "%s: Failed to close WDA!", __func__);
       VOS_ASSERT(VOS_IS_STATUS_SUCCESS(vosStatus));
     }
+  }
+
+  vosStatus = wma_wmi_work_close(vosContext);
+  if (!VOS_IS_STATUS_SUCCESS(vosStatus)) {
+     VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+               "%s: Failed to close wma_wmi_work!", __func__);
+     VOS_ASSERT(VOS_IS_STATUS_SUCCESS(vosStatus));
   }
 
   if (gpVosContext->htc_ctx)
@@ -2474,6 +2541,8 @@ void vos_trigger_recovery(void)
 		return;
 	}
 
+	vos_runtime_pm_prevent_suspend();
+
 	wma_crash_inject(wma_handle, RECOVERY_SIM_SELF_RECOVERY, 0);
 
 	status = vos_wait_single_event(&wma_handle->recovery_event,
@@ -2486,14 +2555,15 @@ void vos_trigger_recovery(void)
 		if (vos_is_logp_in_progress(VOS_MODULE_ID_VOSS, NULL)) {
 			VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
 				"LOGP is in progress, ignore!");
-			return;
+			goto out;
 		}
 		vos_set_logp_in_progress(VOS_MODULE_ID_VOSS, TRUE);
 		cnss_schedule_recovery_work();
 #endif
-
-		return;
 	}
+
+out:
+	vos_runtime_pm_allow_suspend();
 }
 
 v_U64_t vos_get_monotonic_boottime(void)
@@ -2516,3 +2586,369 @@ v_VOID_t vos_pm_control(v_BOOL_t vote)
 #endif
 }
 #endif
+
+/**
+ * vos_set_wakelock_logging() - Logging of wakelock enabled/disabled
+ * @value: Boolean value
+ *
+ * This function is used to set the flag which will indicate whether
+ * logging of wakelock is enabled or not
+ *
+ * Return: None
+ */
+void vos_set_wakelock_logging(bool value)
+{
+	VosContextType *vos_context;
+
+	vos_context = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+	if (!vos_context) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"vos context is Invald");
+		return;
+	}
+	vos_context->is_wakelock_log_enabled = value;
+}
+
+/**
+ * vos_is_wakelock_enabled() - Check if logging of wakelock is enabled/disabled
+ * @value: Boolean value
+ *
+ * This function is used to check whether logging of wakelock is enabled or not
+ *
+ * Return: true if logging of wakelock is enabled
+ */
+bool vos_is_wakelock_enabled(void)
+{
+	VosContextType *vos_context;
+
+	vos_context = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+	if (!vos_context) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"vos context is Invald");
+		return false;
+	}
+	return vos_context->is_wakelock_log_enabled;
+}
+
+/**
+ * vos_set_ring_log_level() - Convert HLOS values to driver log levels
+ * @ring_id: ring_id
+ * @log_levelvalue: Log level specificed
+ *
+ * This function sets the log level of a particular ring
+ *
+ * Return: None
+ */
+void vos_set_ring_log_level(uint32_t ring_id, uint32_t log_level)
+{
+	VosContextType *vos_context;
+	uint32_t log_val;
+
+	vos_context = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+	if (!vos_context) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"%s: vos context is Invald", __func__);
+		return;
+	}
+
+	switch (log_level) {
+	case LOG_LEVEL_NO_COLLECTION:
+		log_val = WLAN_LOG_LEVEL_OFF;
+		break;
+	case LOG_LEVEL_NORMAL_COLLECT:
+		log_val = WLAN_LOG_LEVEL_NORMAL;
+		break;
+	case LOG_LEVEL_ISSUE_REPRO:
+		log_val = WLAN_LOG_LEVEL_REPRO;
+		break;
+	case LOG_LEVEL_ACTIVE:
+	default:
+		log_val = WLAN_LOG_LEVEL_ACTIVE;
+		break;
+	}
+
+	if (ring_id == RING_ID_WAKELOCK) {
+		vos_context->wakelock_log_level = log_val;
+		return;
+	} else if (ring_id == RING_ID_CONNECTIVITY) {
+		vos_context->connectivity_log_level = log_val;
+		return;
+	} else if (ring_id == RING_ID_PER_PACKET_STATS) {
+		vos_context->packet_stats_log_level = log_val;
+		return;
+	} else if (ring_id == RIND_ID_DRIVER_DEBUG) {
+		vos_context->driver_debug_log_level = log_val;
+		return;
+	} else if (ring_id == RING_ID_FIRMWARE_DEBUG) {
+		vos_context->fw_debug_log_level = log_val;
+		return;
+	}
+}
+
+/**
+ * vos_get_ring_log_level() - Get the a ring id's log level
+ * @ring_id: Ring id
+ *
+ * Fetch and return the log level corresponding to a ring id
+ *
+ * Return: Log level corresponding to the ring ID
+ */
+enum wifi_driver_log_level vos_get_ring_log_level(uint32_t ring_id)
+{
+	VosContextType *vos_context;
+
+	vos_context = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+	if (!vos_context) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"%s: vos context is Invald", __func__);
+		return WLAN_LOG_LEVEL_OFF;
+	}
+
+	if (ring_id == RING_ID_WAKELOCK)
+		return vos_context->wakelock_log_level;
+	else if (ring_id == RING_ID_CONNECTIVITY)
+		return vos_context->connectivity_log_level;
+	else if (ring_id == RING_ID_PER_PACKET_STATS)
+		return vos_context->packet_stats_log_level;
+	else if (ring_id == RIND_ID_DRIVER_DEBUG)
+		return vos_context->driver_debug_log_level;
+	else if (ring_id == RING_ID_FIRMWARE_DEBUG)
+		return vos_context->fw_debug_log_level;
+
+	return WLAN_LOG_LEVEL_OFF;
+}
+
+/**
+ * vos_set_multicast_logging() - Set mutlicast logging value
+ * @value: Value of multicast logging
+ *
+ * Set the multicast logging value which will indicate
+ * whether to multicast host and fw messages even
+ * without any registration by userspace entity
+ *
+ * Return: None
+ */
+void vos_set_multicast_logging(uint8_t value)
+{
+	vos_multicast_logging = value;
+}
+
+/**
+ * vos_is_multicast_logging() - Get multicast logging value
+ *
+ * Get the multicast logging value which will indicate
+ * whether to multicast host and fw messages even
+ * without any registration by userspace entity
+ *
+ * Return: 0 - Multicast logging disabled, 1 - Multicast logging enabled
+ */
+uint8_t vos_is_multicast_logging(void)
+{
+	return vos_multicast_logging;
+}
+
+/*
+ * vos_init_log_completion() - Initialize log param structure
+ *
+ * This function is used to initialize the logging related
+ * parameters
+ *
+ * Return: None
+ */
+void vos_init_log_completion(void)
+{
+	VosContextType *vos_context;
+
+	vos_context = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+	if (!vos_context) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"%s: vos context is Invalid", __func__);
+		return;
+	}
+
+	vos_context->log_complete.is_fatal = WLAN_LOG_TYPE_NON_FATAL;
+	vos_context->log_complete.indicator = WLAN_LOG_INDICATOR_UNUSED;
+	vos_context->log_complete.reason_code = WLAN_LOG_REASON_CODE_UNUSED;
+	vos_context->log_complete.is_report_in_progress = false;
+	/* Attempting to initialize an already initialized lock
+	 * results in a failure. This must be ok here.
+	 */
+	vos_spin_lock_init(&vos_context->bug_report_lock);
+}
+
+/**
+ * vos_deinit_log_completion() - Deinitialize log param structure
+ *
+ * This function is used to deinitialize the logging related
+ * parameters
+ *
+ * Return: None
+ */
+void vos_deinit_log_completion(void)
+{
+	VosContextType *vos_context;
+
+	vos_context = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+	if (!vos_context) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"%s: vos context is Invalid", __func__);
+		return;
+	}
+
+	vos_spin_lock_destroy(&vos_context->bug_report_lock);
+}
+
+/**
+ * vos_set_log_completion() - Store the logging params
+ * @is_fatal: Indicates if the event triggering bug report is fatal or not
+ * @indicator: Source which trigerred the bug report
+ * @reason_code: Reason for triggering bug report
+ *
+ * This function is used to set the logging parameters based on the
+ * caller
+ *
+ * Return: 0 if setting of params is successful
+ */
+VOS_STATUS vos_set_log_completion(uint32_t is_fatal,
+		uint32_t indicator,
+		uint32_t reason_code)
+{
+	VosContextType *vos_context;
+
+	vos_context = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+	if (!vos_context) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"%s: vos context is Invalid", __func__);
+		return VOS_STATUS_E_FAILURE;
+	}
+
+	vos_spin_lock_acquire(&vos_context->bug_report_lock);
+	vos_context->log_complete.is_fatal = is_fatal;
+	vos_context->log_complete.indicator = indicator;
+	vos_context->log_complete.reason_code = reason_code;
+	vos_context->log_complete.is_report_in_progress = true;
+	vos_spin_lock_release(&vos_context->bug_report_lock);
+	return VOS_STATUS_SUCCESS;
+}
+
+/**
+ * vos_get_log_completion() - Get the logging related params
+ * @is_fatal: Indicates if the event triggering bug report is fatal or not
+ * @indicator: Source which trigerred the bug report
+ * @reason_code: Reason for triggering bug report
+ *
+ * This function is used to get the logging related parameters
+ *
+ * Return: None
+ */
+void vos_get_log_completion(uint32_t *is_fatal,
+		uint32_t *indicator,
+		uint32_t *reason_code)
+{
+	VosContextType *vos_context;
+
+	vos_context = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+	if (!vos_context) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"%s: vos context is Invalid", __func__);
+		return;
+	}
+
+	vos_spin_lock_acquire(&vos_context->bug_report_lock);
+	*is_fatal =  vos_context->log_complete.is_fatal;
+	*indicator = vos_context->log_complete.indicator;
+	*reason_code = vos_context->log_complete.reason_code;
+	vos_context->log_complete.is_report_in_progress = false;
+	vos_spin_lock_release(&vos_context->bug_report_lock);
+}
+
+/**
+ * vos_is_log_report_in_progress() - Check if bug reporting is in progress
+ *
+ * This function is used to check if the bug reporting is already in progress
+ *
+ * Return: true if the bug reporting is in progress
+ */
+bool vos_is_log_report_in_progress(void)
+{
+	VosContextType *vos_context;
+
+	vos_context = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+	if (!vos_context) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"%s: vos context is Invalid", __func__);
+		return true;
+	}
+	return vos_context->log_complete.is_report_in_progress;
+}
+
+/**
+ * vos_flush_logs() - Report fatal event to userspace
+ * @is_fatal: Indicates if the event triggering bug report is fatal or not
+ * @indicator: Source which trigerred the bug report
+ * @reason_code: Reason for triggering bug report
+ *
+ * This function sets the log related params and send the WMI command to the
+ * FW to flush its logs. On receiving the flush completion event from the FW
+ * the same will be conveyed to userspace
+ *
+ * Return: 0 on success
+ */
+VOS_STATUS vos_flush_logs(uint32_t is_fatal,
+		uint32_t indicator,
+		uint32_t reason_code)
+{
+	uint32_t ret;
+	VOS_STATUS status;
+
+	VosContextType *vos_context;
+
+	vos_context = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+	if (!vos_context) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"%s: vos context is Invalid", __func__);
+		return eHAL_STATUS_FAILURE;
+	}
+
+	if (vos_is_log_report_in_progress() == true) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+				"%s: Bug report already in progress - dropping! type:%d, indicator=%d reason_code=%d",
+				__func__, is_fatal, indicator, reason_code);
+		return VOS_STATUS_E_FAILURE;
+	}
+
+	status = vos_set_log_completion(is_fatal, indicator, reason_code);
+	if (VOS_STATUS_SUCCESS != status) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+			"%s: Failed to set log trigger params", __func__);
+		return VOS_STATUS_E_FAILURE;
+	}
+
+	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
+			"%s: Triggering bug report: type:%d, indicator=%d reason_code=%d",
+			__func__, is_fatal, indicator, reason_code);
+
+	ret = vos_send_flush_logs_cmd_to_fw(vos_context->pMACContext);
+	if (0 != ret) {
+		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+			"%s: Failed to send flush FW log", __func__);
+		vos_init_log_completion();
+		return VOS_STATUS_E_FAILURE;
+	}
+
+	return VOS_STATUS_SUCCESS;
+}
+
+/**
+ * vos_logging_set_fw_flush_complete() - Wrapper for FW log flush completion
+ *
+ * This function is used to send signal to the logger thread to indicate
+ * that the flushing of FW logs is complete by the FW
+ *
+ * Return: None
+ *
+ */
+void vos_logging_set_fw_flush_complete(void)
+{
+	wlan_logging_set_fw_flush_complete();
+}
