@@ -29,7 +29,7 @@
 #ifdef VENDOR_EDIT
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
-int otg_switch;
+int otg_switch = 1;
 struct dwc3_otg *gdotg;//add by jch for otg swith retest id,2015-6-5
 #if 0
  static ssize_t  proc_otg_switch_all_read(struct file *f, char __user *buf,size_t count, loff_t *ppos)
