@@ -456,6 +456,8 @@ struct mdss_dsi_ctrl_pdata {
 	struct mdss_util_intf *mdss_util;
 
 	bool dfps_status;	/* dynamic refresh status */
+
+	struct timespec wait_until_ts;
 };
 
 struct dsi_status_data {
