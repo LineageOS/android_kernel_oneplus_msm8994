@@ -1038,7 +1038,6 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	flag_lcd_off = false;
 	mutex_unlock(&cabc_mutex);
 #endif
-	mdss_livedisplay_update(ctrl, MODE_UPDATE_ALL);
 
 end:
 	pinfo->blank_state = MDSS_PANEL_BLANK_UNBLANK;
