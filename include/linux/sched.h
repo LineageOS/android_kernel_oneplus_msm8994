@@ -1077,6 +1077,9 @@ struct ravg {
 	u64 mark_start;
 	u32 sum, demand;
 	u32 sum_history[RAVG_HIST_SIZE_MAX];
+#ifdef VENDOR_EDIT
+	unsigned mitigated:1;
+#endif
 #ifdef CONFIG_SCHED_FREQ_INPUT
 	u32 curr_window, prev_window;
 #endif
@@ -1151,6 +1154,10 @@ struct task_struct {
 	unsigned int flags;	/* per process flags, defined below */
 	unsigned int ptrace;
 
+#ifdef VENDOR_EDIT
+//huruihuan add for kill task in D status
+	unsigned int kill_flag;
+#endif
 #ifdef CONFIG_SMP
 	struct llist_node wake_entry;
 	int on_cpu;

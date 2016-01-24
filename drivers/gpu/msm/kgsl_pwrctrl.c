@@ -1407,6 +1407,7 @@ void kgsl_thermal_timer(unsigned long data)
 	queue_work(device->work_queue, &device->pwrctrl.thermal_cycle_ws);
 }
 
+int get_chipset_a57speedbin(void);
 int kgsl_pwrctrl_init(struct kgsl_device *device)
 {
 	int i, k, m, set_bus = 1, n = 0, result = 0;
@@ -1445,6 +1446,10 @@ int kgsl_pwrctrl_init(struct kgsl_device *device)
 	/* Initialize the user and thermal clock constraints */
 
 	pwr->max_pwrlevel = 0;
+#if 0
+	if(get_chipset_a57speedbin())
+		pwr->max_pwrlevel = 1;
+#endif
 	pwr->min_pwrlevel = pdata->num_levels - 2;
 	pwr->thermal_pwrlevel = 0;
 

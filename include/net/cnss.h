@@ -104,6 +104,10 @@ enum cnss_driver_status {
 	CNSS_LOAD_UNLOAD
 };
 
+extern int cnss_get_fw_image(struct image_desc_info *image_desc_info);
+//#ifdef VENDOR_EDIT
+extern void cnss_set_fw_version(u32 version);
+//#endif /* VENDOR_EDIT */
 enum cnss_runtime_request {
 	CNSS_PM_RUNTIME_GET,
 	CNSS_PM_RUNTIME_PUT,
