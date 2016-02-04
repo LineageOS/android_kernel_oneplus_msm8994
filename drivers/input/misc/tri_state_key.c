@@ -44,10 +44,15 @@ typedef enum {
 	MODE_MAX_NUM
 } tri_mode_t;
 
+#define MODE_TOTAL_SILENCE 600
+#define MODE_ALARMS_ONLY 601
+#define MODE_PRIORITY_ONLY 602
+#define MODE_NONE 603
+
 static int current_mode = 0;
-static int keyCode_slider_top = 600;
-static int keyCode_slider_middle = 601;
-static int keyCode_slider_bottom = 602;
+static int keyCode_slider_top = MODE_ALARMS_ONLY;
+static int keyCode_slider_middle = MODE_PRIORITY_ONLY;
+static int keyCode_slider_bottom = MODE_NONE;
 
 struct switch_dev_data {
 	//tri_mode_t last_type;
@@ -304,7 +309,7 @@ static ssize_t keyCode_slider_top_store(struct device *dev,
 
 	if (sscanf(buf, "%d", &data) != 1)
 		return -EINVAL;
-	if (data != 600 && data != 601 && data != 602)
+	if (data < 600 || data > 603)
 		return -EINVAL;
 
 	keyCode_slider_top = data;
@@ -327,7 +332,7 @@ static ssize_t keyCode_slider_middle_store(struct device *dev,
 
 	if (sscanf(buf, "%d", &data) != 1)
 		return -EINVAL;
-	if (data != 600 && data != 601 && data != 602)
+	if (data < 600 || data > 603)
 		return -EINVAL;
 
 	keyCode_slider_middle = data;
@@ -350,7 +355,7 @@ static ssize_t keyCode_slider_bottom_store(struct device *dev,
 
 	if (sscanf(buf, "%d", &data) != 1)
 		return -EINVAL;
-	if (data != 600 && data != 601 && data != 602)
+	if (data < 600 || data > 603)
 		return -EINVAL;
 
 	keyCode_slider_bottom = data;
@@ -406,9 +411,10 @@ static int tristate_dev_probe(struct platform_device *pdev)
 	switch_data->input->name = DRV_NAME;
 	switch_data->input->dev.parent = &pdev->dev;
 	set_bit(EV_KEY, switch_data->input->evbit);
-	set_bit(keyCode_slider_top, switch_data->input->keybit);
-	set_bit(keyCode_slider_middle, switch_data->input->keybit);
-	set_bit(keyCode_slider_bottom, switch_data->input->keybit);
+	set_bit(MODE_TOTAL_SILENCE, switch_data->input->keybit);
+	set_bit(MODE_ALARMS_ONLY, switch_data->input->keybit);
+	set_bit(MODE_PRIORITY_ONLY, switch_data->input->keybit);
+	set_bit(MODE_NONE, switch_data->input->keybit);
 	input_set_drvdata(switch_data->input, switch_data);
 	error = input_register_device(switch_data->input);
 	if (error) {
