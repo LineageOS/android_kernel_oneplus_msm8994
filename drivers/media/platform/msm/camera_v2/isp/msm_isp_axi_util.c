@@ -23,6 +23,8 @@
 /* at how many frames to add frame skip pattern */
 #define BURST_SKIP_THRESHOLD              (16)
 
+extern int configure_ps_sensor(int enable);
+
 int msm_isp_axi_create_stream(
 	struct msm_vfe_axi_shared_data *axi_data,
 	struct msm_vfe_axi_stream_request_cmd *stream_cfg_cmd)
@@ -606,10 +608,12 @@ void msm_isp_notify(struct vfe_device *vfe_dev, uint32_t event_type,
 			vfe_dev->axi_data.src_info[frame_src].frame_id = 1;
 
 		#ifdef VENDOR_EDIT
-		if (vfe_dev->axi_data.src_info[frame_src].frame_id <= 5u)
+		if (vfe_dev->axi_data.src_info[frame_src].frame_id <= 5u) {
+			configure_ps_sensor(1);
 			pr_info("%s: frame_src %d frame id: %u\n", __func__,
 				frame_src,
 				vfe_dev->axi_data.src_info[frame_src].frame_id);
+		}
 		#else
 		ISP_DBG("%s: frame_src %d frame id: %u\n", __func__,
 			frame_src,

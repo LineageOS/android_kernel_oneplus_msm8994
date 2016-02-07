@@ -487,30 +487,16 @@ static irqreturn_t stmvl6180_interrupt_handler(int vec, void *info)
 /*
  * SysFS support
  */
-static ssize_t stmvl6180_show_enable_ps_sensor(struct device *dev,
-				struct device_attribute *attr, char *buf)
+int configure_ps_sensor(int enable)
 {
 	struct stmvl6180_data *vl6180_data = vl6180_data_g;
-	
-	return sprintf(buf, "%d\n", vl6180_data->enable_ps_sensor);
-}
-
-static ssize_t stmvl6180_store_enable_ps_sensor(struct device *dev,
-				struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct stmvl6180_data *vl6180_data = vl6180_data_g;
-	unsigned long val = simple_strtoul(buf, NULL, 10);
  	unsigned long flags;
 	int rc = 0;
-	
-	CDBG("enable %ld\n", val);
-	if ((val != 0) && (val != 1)) {
-		pr_err("%s:%d store unvalid value=%ld\n", __func__, __LINE__, val);
-		return count;
-	}
-	mutex_lock(&vl6180_data->work_mutex);
 
-	if(val == 1){
+	if (vl6180_data->enable_ps_sensor == enable)
+		return 0;
+
+	if(enable == 1){
 		//turn on p sensor
 		if (vl6180_data->enable_ps_sensor==0) {	
 			stmvl6180_set_enable(client,0); /* Power Off */
@@ -545,7 +531,7 @@ static ssize_t stmvl6180_store_enable_ps_sensor(struct device *dev,
 			 */
 			cancel_delayed_work(&vl6180_data->dwork);
 			//schedule_delayed_work(&data->dwork, msecs_to_jiffies(INT_POLLING_DELAY));	
-			schedule_delayed_work(&vl6180_data->dwork, msecs_to_jiffies(vl6180_data->delay_ms));	
+			schedule_delayed_work(&vl6180_data->dwork, 0);	
 			spin_unlock_irqrestore(&vl6180_data->update_lock.wait_lock, flags);	
 
 			stmvl6180_set_enable(client, 1); /* Power On */	 
@@ -579,7 +565,32 @@ static ssize_t stmvl6180_store_enable_ps_sensor(struct device *dev,
 		}		
 		}
 	}
-	mutex_unlock(&vl6180_data->work_mutex);
+	return rc;
+}
+
+static ssize_t stmvl6180_show_enable_ps_sensor(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct stmvl6180_data *vl6180_data = vl6180_data_g;
+	return sprintf(buf, "%d\n", vl6180_data->enable_ps_sensor);
+}
+
+static ssize_t stmvl6180_store_enable_ps_sensor(struct device *dev,
+				struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned long val = simple_strtoul(buf, NULL, 10);
+	int rc = 0;
+	
+	CDBG("enable %ld\n", val);
+	if ((val != 0) && (val != 1)) {
+		pr_err("%s:%d store unvalid value=%ld\n", __func__, __LINE__, val);
+		return count;
+	}
+
+	mutex_lock(&vl6180_data_g->work_mutex);
+	rc = configure_ps_sensor(val);
+	if (rc) return rc;
+	mutex_unlock(&vl6180_data_g->work_mutex);
 
 	return count;
 }
@@ -1183,7 +1194,7 @@ int stmvl6180_power_enable(struct stmvl6180_data *vl6180_data, unsigned int enab
 				return rc;
 			}
 		}		
-		msleep(5);
+		//msleep(5);
 #if 0		
 		rc = gpio_direction_output(vl6180_data->ce_gpio,1);
 		if(rc){
@@ -1215,7 +1226,7 @@ int stmvl6180_power_enable(struct stmvl6180_data *vl6180_data, unsigned int enab
 			regulator_disable(vl6180_data->vdd_regulator);
 			return rc;
 		}		
-		msleep(1);
+		//msleep(1);
 		vl6180_data->enable = 1;		
 		}
 	} else {
