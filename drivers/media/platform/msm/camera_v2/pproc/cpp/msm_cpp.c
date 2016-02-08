@@ -82,7 +82,6 @@ static int msm_cpp_send_frame_to_hardware(struct cpp_device *cpp_dev,
 	struct msm_queue_cmd *frame_qcmd);
 static int msm_cpp_send_command_to_hardware(struct cpp_device *cpp_dev,
 	uint32_t *cmd_msg, uint32_t payload_size);
-extern int configure_ps_sensor(int enable);
 
 #if CONFIG_MSM_CPP_DBG
 #define CPP_DBG(fmt, args...) pr_err(fmt, ##args)
@@ -690,7 +689,6 @@ void cpp_release_ion_client(struct kref *ref)
 		struct cpp_device, refcount);
 	pr_err("Calling ion_client_destroy\n");
 	ion_client_destroy(cpp_dev->client);
-	configure_ps_sensor(0);
 }
 
 static int cpp_init_mem(struct cpp_device *cpp_dev)

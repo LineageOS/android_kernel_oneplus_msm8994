@@ -35,6 +35,8 @@
 #define fh_to_private(__fh) \
 	container_of(__fh, struct camera_v4l2_private, fh)
 
+extern int configure_ps_sensor(int enable, int delay);
+
 struct camera_v4l2_private {
 	struct v4l2_fh fh;
 	unsigned int stream_id;
@@ -545,6 +547,7 @@ static int camera_v4l2_open(struct file *filep)
 				__func__, __LINE__, rc);
 		goto fh_open_fail;
 	}
+	configure_ps_sensor(1, false);
 
 	opn_idx = atomic_read(&pvdev->opened);
 	idx = opn_idx;
@@ -683,6 +686,7 @@ static int camera_v4l2_close(struct file *filep)
 	camera_v4l2_vb2_q_release(filep);
 	camera_v4l2_fh_release(filep);
 
+	configure_ps_sensor(0, false);
 	return rc;
 }
 
