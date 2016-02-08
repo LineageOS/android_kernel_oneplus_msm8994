@@ -97,27 +97,31 @@ static void send_input(int keyCode)
 static void switch_dev_work(struct work_struct *work)
 {
 	int keyCode;
+	int mode;
 	//printk("%s  gpio_get_value(%d)=%d\n",__func__,switch_data->key1_gpio,gpio_get_value(switch_data->key1_gpio));
 	//printk("%s  gpio_get_value(%d)=%d\n",__func__,switch_data->key2_gpio,gpio_get_value(switch_data->key2_gpio));
-	mutex_lock(&sem); 
+	mutex_lock(&sem);
 	if(!gpio_get_value(switch_data->key2_gpio))
 	{
-		current_mode = MODE_NORMAL;
+		mode = MODE_NORMAL;
 		keyCode = keyCode_slider_bottom;
 	}
 	else if(gpio_get_value(switch_data->key1_gpio))
 	{
-		current_mode = MODE_DO_NOT_DISTURB;
+		mode = MODE_DO_NOT_DISTURB;
 		keyCode = keyCode_slider_middle;
 	}
 	else
 	{
-		current_mode = MODE_MUTE;
+		mode = MODE_MUTE;
 		keyCode = keyCode_slider_top;
 	}
-	switch_set_state(&switch_data->sdev, current_mode);
-	send_input(keyCode);
-	printk("%s ,tristate set to state(%d) \n",__func__,switch_data->sdev.state);
+	if (current_mode != mode) {
+		current_mode = mode;
+		switch_set_state(&switch_data->sdev, current_mode);
+		send_input(keyCode);
+		printk("%s ,tristate set to state(%d) \n",__func__,switch_data->sdev.state);
+	}
 	mutex_unlock(&sem);
 }
 irqreturn_t switch_dev_interrupt(int irq, void *_dev)
