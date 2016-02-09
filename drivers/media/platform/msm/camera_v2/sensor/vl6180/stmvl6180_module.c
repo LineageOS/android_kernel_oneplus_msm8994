@@ -487,7 +487,7 @@ static irqreturn_t stmvl6180_interrupt_handler(int vec, void *info)
 /*
  * SysFS support
  */
-int configure_ps_sensor(int enable, bool delay)
+int configure_ps_sensor(int enable)
 {
 	struct stmvl6180_data *vl6180_data = vl6180_data_g;
  	unsigned long flags;
@@ -531,7 +531,7 @@ int configure_ps_sensor(int enable, bool delay)
 			 */
 			cancel_delayed_work(&vl6180_data->dwork);
 			//schedule_delayed_work(&data->dwork, msecs_to_jiffies(INT_POLLING_DELAY));	
-			schedule_delayed_work(&vl6180_data->dwork, delay ? msecs_to_jiffies(vl6180_data->delay_ms) : 0);	
+			schedule_delayed_work(&vl6180_data->dwork, 0);	
 			spin_unlock_irqrestore(&vl6180_data->update_lock.wait_lock, flags);	
 
 			stmvl6180_set_enable(client, 1); /* Power On */	 
@@ -588,7 +588,7 @@ static ssize_t stmvl6180_store_enable_ps_sensor(struct device *dev,
 	}
 
 	mutex_lock(&vl6180_data_g->work_mutex);
-	rc = configure_ps_sensor(val, true);
+	rc = configure_ps_sensor(val);
 	if (rc) return rc;
 	mutex_unlock(&vl6180_data_g->work_mutex);
 
@@ -1194,7 +1194,7 @@ int stmvl6180_power_enable(struct stmvl6180_data *vl6180_data, unsigned int enab
 				return rc;
 			}
 		}		
-		msleep(5);
+		//msleep(5);
 #if 0		
 		rc = gpio_direction_output(vl6180_data->ce_gpio,1);
 		if(rc){
@@ -1226,7 +1226,7 @@ int stmvl6180_power_enable(struct stmvl6180_data *vl6180_data, unsigned int enab
 			regulator_disable(vl6180_data->vdd_regulator);
 			return rc;
 		}		
-		msleep(1);
+		//msleep(1);
 		vl6180_data->enable = 1;		
 		}
 	} else {
