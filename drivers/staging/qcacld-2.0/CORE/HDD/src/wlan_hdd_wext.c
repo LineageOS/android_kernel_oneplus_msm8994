@@ -189,7 +189,7 @@ static const hdd_freq_chan_map_t freq_chan_map[] = { {2412, 1}, {2417, 2},
 #define WE_TXRX_FWSTATS_RESET           41
 #define WE_SET_MAX_TX_POWER_2_4   42
 #define WE_SET_MAX_TX_POWER_5_0   43
-#define WE_SET_POWER_GATING       44
+/* 44 is unused */
 /* Private ioctl for packet power save */
 #define  WE_PPS_PAID_MATCH              45
 #define  WE_PPS_GID_MATCH               46
@@ -272,7 +272,7 @@ static const hdd_freq_chan_map_t freq_chan_map[] = { {2412, 1}, {2417, 2},
 #define WE_GET_AMSDU         28
 #define WE_GET_TXPOW_2G      29
 #define WE_GET_TXPOW_5G      30
-#define WE_GET_POWER_GATING  31
+/* 31 is unused */
 #define WE_GET_PPS_PAID_MATCH           32
 #define WE_GET_PPS_GID_MATCH            33
 #define WE_GET_PPS_EARLY_TIM_CLEAR      34
@@ -2538,6 +2538,7 @@ static int __iw_set_genie(struct net_device *dev, struct iw_request_info *info,
     u_int8_t *genie = NULL;
     u_int8_t *base_genie = NULL;
     v_U16_t remLen;
+    int ret = 0;
 
    ENTER();
 
@@ -2587,8 +2588,8 @@ static int __iw_set_genie(struct net_device *dev, struct iw_request_info *info,
             case IE_EID_VENDOR:
                 if ((IE_LEN_SIZE+IE_EID_SIZE+IE_VENDOR_OUI_SIZE) > eLen) /* should have at least OUI */
                 {
-                    kfree(base_genie);
-                    return -EINVAL;
+                    ret = -EINVAL;
+                    goto exit;
                 }
 
                 if (0 == memcmp(&genie[0], "\x00\x50\xf2\x04", 4))
@@ -2602,8 +2603,8 @@ static int __iw_set_genie(struct net_device *dev, struct iw_request_info *info,
                        hddLog(VOS_TRACE_LEVEL_FATAL, "Cannot accommodate genIE. "
                                                       "Need bigger buffer space");
                        VOS_ASSERT(0);
-                       kfree(base_genie);
-                       return -ENOMEM;
+                       ret = -EINVAL;
+                       goto exit;
                     }
                     // save to Additional IE ; it should be accumulated to handle WPS IE + other IE
                     memcpy( pWextState->genIE.addIEdata + curGenIELen, genie - 2, eLen + 2);
@@ -2612,6 +2613,14 @@ static int __iw_set_genie(struct net_device *dev, struct iw_request_info *info,
                 else if (0 == memcmp(&genie[0], "\x00\x50\xf2", 3))
                 {
                     hddLog (VOS_TRACE_LEVEL_INFO, "%s Set WPA IE (len %d)",__func__, eLen + 2);
+                    if ((eLen + 2) > (sizeof(pWextState->WPARSNIE)))
+                    {
+                       hddLog(VOS_TRACE_LEVEL_FATAL, "Cannot accommodate genIE. "
+                                                      "Need bigger buffer space");
+                       ret = -EINVAL;
+                       VOS_ASSERT(0);
+                       goto exit;
+                    }
                     memset( pWextState->WPARSNIE, 0, MAX_WPA_RSN_IE_LEN );
                     memcpy( pWextState->WPARSNIE, genie - 2, (eLen + 2));
                     pWextState->roamProfile.pWPAReqIE = pWextState->WPARSNIE;
@@ -2628,8 +2637,8 @@ static int __iw_set_genie(struct net_device *dev, struct iw_request_info *info,
                        hddLog(VOS_TRACE_LEVEL_FATAL, "Cannot accommodate genIE. "
                                                       "Need bigger buffer space");
                        VOS_ASSERT(0);
-                       kfree(base_genie);
-                       return -ENOMEM;
+                       ret = -ENOMEM;
+                       goto exit;
                     }
                     // save to Additional IE ; it should be accumulated to handle WPS IE + other IE
                     memcpy( pWextState->genIE.addIEdata + curGenIELen, genie - 2, eLen + 2);
@@ -2638,6 +2647,14 @@ static int __iw_set_genie(struct net_device *dev, struct iw_request_info *info,
               break;
          case DOT11F_EID_RSN:
                 hddLog (LOG1, "%s Set RSN IE (len %d)",__func__, eLen+2);
+                if ((eLen + 2) > (sizeof(pWextState->WPARSNIE)))
+                {
+                    hddLog(VOS_TRACE_LEVEL_FATAL, "Cannot accommodate genIE. "
+                                                  "Need bigger buffer space");
+                    ret = -EINVAL;
+                    VOS_ASSERT(0);
+                    goto exit;
+                }
                 memset( pWextState->WPARSNIE, 0, MAX_WPA_RSN_IE_LEN );
                 memcpy( pWextState->WPARSNIE, genie - 2, (eLen + 2));
                 pWextState->roamProfile.pRSNReqIE = pWextState->WPARSNIE;
@@ -2646,15 +2663,15 @@ static int __iw_set_genie(struct net_device *dev, struct iw_request_info *info,
 
          default:
                 hddLog (LOGE, "%s Set UNKNOWN IE %X",__func__, elementId);
-            kfree(base_genie);
-            return 0;
+                goto exit;
     }
         genie += eLen;
         remLen -= eLen;
     }
+exit:
     EXIT();
     kfree(base_genie);
-    return 0;
+    return ret;
 }
 
 /**
@@ -6336,16 +6353,6 @@ static int iw_setint_getnone(struct net_device *dev, struct iw_request_info *inf
              break;
          }
 
-         case WE_SET_POWER_GATING:
-         {
-              hddLog(LOG1, "WMI_PDEV_PARAM_POWER_GATING_SLEEP val %d",
-                     set_value);
-              ret = process_wma_set_command((int)pAdapter->sessionId,
-                                        (int)WMI_PDEV_PARAM_POWER_GATING_SLEEP,
-                                        (set_value)? true:false, PDEV_CMD);
-              break;
-         }
-
          /* Firmware debug log */
          case WE_DBGLOG_LOG_LEVEL:
          {
@@ -6898,6 +6905,12 @@ static int iw_setchar_getnone(struct net_device *dev, struct iw_request_info *in
         return -EBUSY;
     }
 
+    if (!capable(CAP_NET_ADMIN)){
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                  FL("permission check failed"));
+        return -EPERM;
+    }
+
     /* helper function to get iwreq_data with compat handling. */
     if (hdd_priv_get_data(&s_priv_data, wrqu)) {
        return -EINVAL;
@@ -7361,16 +7374,6 @@ static int iw_setnone_getint(struct net_device *dev, struct iw_request_info *inf
             break;
         }
 
-        case WE_GET_POWER_GATING:
-        {
-            hddLog(LOG1, "GET WMI_PDEV_PARAM_POWER_GATING_SLEEP");
-            *value = wma_cli_get_command(wmapvosContext,
-                                         (int)pAdapter->sessionId,
-                                        (int)WMI_PDEV_PARAM_POWER_GATING_SLEEP,
-                                        PDEV_CMD);
-            break;
-        }
-
 	case WE_GET_PPS_PAID_MATCH:
         {
             hddLog(LOG1, "GET WMI_VDEV_PPS_PAID_MATCH");
@@ -7537,6 +7540,12 @@ int iw_set_three_ints_getnone(struct net_device *dev,
                                   "%s:LOGP in Progress. Ignore!!!", __func__);
         return -EBUSY;
     }
+    if (!capable(CAP_NET_ADMIN)) {
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                  FL("permission check failed"));
+        return -EPERM;
+    }
+
 
     switch(sub_cmd) {
 
@@ -8205,7 +8214,11 @@ static int __iw_set_var_ints_getnone(struct net_device *dev,
     int cmd = 0;
     int staId = 0;
     struct iw_point s_priv_data;
-
+    if (!capable(CAP_NET_ADMIN)) {
+            VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                    FL("permission check failed"));
+            return -EPERM;
+    }
     /* helper function to get iwreq_data with compat handling. */
     if (hdd_priv_get_data(&s_priv_data, wrqu)) {
        return -EINVAL;
@@ -8279,6 +8292,13 @@ static int __iw_set_var_ints_getnone(struct net_device *dev,
         case WE_P2P_NOA_CMD:
             {
                 p2p_app_setP2pPs_t p2pNoA;
+
+                if (pAdapter->device_mode != WLAN_HDD_P2P_GO) {
+                    hddLog(LOGE,
+                        FL("Setting NoA is not allowed in Device mode: %d"),
+                        pAdapter->device_mode);
+                    return -EINVAL;
+                }
 
                 p2pNoA.opp_ps = apps_args[0];
                 p2pNoA.ctWindow = apps_args[1];
@@ -8835,6 +8855,12 @@ static int iw_clear_dynamic_mcbc_filter(struct net_device *dev,
     tpSirWlanSetRxpFilters wlanRxpFilterParam;
     hddLog(VOS_TRACE_LEVEL_INFO_HIGH, "%s: ", __func__);
 
+
+    if (!capable(CAP_NET_ADMIN)) {
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                 FL("permission check failed"));
+        return -EPERM;
+    }
     //Reset the filter to INI value as we have to clear the dynamic filter
     pHddCtx->configuredMcastBcastFilter = pHddCtx->cfg_ini->mcastBcastFilterSetting;
 
@@ -9074,6 +9100,9 @@ int wlan_hdd_set_filter(hdd_context_t *pHddCtx, tpPacketFilterCfg pRequest,
 
                 hddLog(VOS_TRACE_LEVEL_INFO, "Data Offset %d Data Len %d",
                         pRequest->paramsData[i].dataOffset, pRequest->paramsData[i].dataLength);
+                if ((sizeof(packetFilterSetReq.paramsData[i].compareData)) <
+                           (pRequest->paramsData[i].dataLength))
+                    return -EINVAL;
 
                 memcpy(&packetFilterSetReq.paramsData[i].compareData,
                         pRequest->paramsData[i].compareData, pRequest->paramsData[i].dataLength);
@@ -9408,6 +9437,12 @@ static int iw_set_packet_filter_params(struct net_device *dev,
     tpPacketFilterCfg pRequest = NULL;
     int ret;
     struct iw_point s_priv_data;
+    if (!capable(CAP_NET_ADMIN)) {
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                  FL("permission check failed"));
+        return -EPERM;
+    }
+
 
     if (hdd_priv_get_data(&s_priv_data, wrqu)) {
        return -EINVAL;
@@ -10100,6 +10135,12 @@ static int iw_set_band_config(struct net_device *dev,
         return -EBUSY;
     }
 
+    if (!capable(CAP_NET_ADMIN)) {
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                  FL("permission check failed"));
+        return -EPERM;
+    }
+
     return hdd_setBand(dev, value[0]);
 }
 
@@ -10111,7 +10152,13 @@ static int iw_set_power_params_priv(struct net_device *dev,
   char *ptr;
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
                 "Set power params Private");
-  /* ODD number is used for set, copy data using copy_from_user */
+
+  if (!capable(CAP_NET_ADMIN)) {
+      VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                 FL("permission check failed"));
+      return -EPERM;
+  }
+ /* ODD number is used for set, copy data using copy_from_user */
   ptr = mem_alloc_copy_from_user_helper(wrqu->data.pointer,
                                         wrqu->data.length);
   if (NULL == ptr)
@@ -10276,6 +10323,7 @@ int iw_set_two_ints_getnone(struct net_device *dev,
     int *value = (int *)extra;
     int sub_cmd = value[0];
     int ret = 0;
+    hdd_context_t *hdd_ctx = WLAN_HDD_GET_CTX(pAdapter);
 
     if ((WLAN_HDD_GET_CTX(pAdapter))->isLogpInProgress) {
         VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_FATAL,
@@ -10295,6 +10343,10 @@ int iw_set_two_ints_getnone(struct net_device *dev,
         hddLog(LOGE, "WE_SET_FW_CRASH_INJECT: %d %d", value[1], value[2]);
         pr_err("SSR is triggered by iwpriv CRASH_INJECT: %d %d\n",
                                                 value[1], value[2]);
+        if (!hdd_ctx->cfg_ini->crash_inject_enabled) {
+            hddLog(LOGE, "Crash Inject ini disabled, Ignore Crash Inject");
+            return 0;
+        }
         ret = process_wma_set_command_twoargs((int) pAdapter->sessionId,
                                               (int) GEN_PARAM_CRASH_INJECT,
                                               value[1], value[2], GEN_CMD);
@@ -10662,11 +10714,6 @@ static const struct iw_priv_args we_private_args[] = {
         0,
         "txpow5g" },
 
-    {   WE_SET_POWER_GATING,
-        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
-        0,
-        "pwrgating" },
-
     /* Sub-cmds DBGLOG specific commands */
     {   WE_DBGLOG_LOG_LEVEL ,
         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
@@ -11016,11 +11063,6 @@ static const struct iw_priv_args we_private_args[] = {
         0,
         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
         "get_txpow5g" },
-
-    {   WE_GET_POWER_GATING,
-        0,
-        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
-        "get_pwrgating" },
 
     {   WE_GET_PPS_PAID_MATCH,
 	0,

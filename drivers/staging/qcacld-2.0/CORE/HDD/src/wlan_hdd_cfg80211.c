@@ -1287,7 +1287,8 @@ __wlan_hdd_cfg80211_get_supported_features(struct wiphy *wiphy,
     fset |= WIFI_FEATURE_HOTSPOT;
 
 #ifdef FEATURE_WLAN_EXTSCAN
-    if (sme_IsFeatureSupportedByFW(EXTENDED_SCAN)) {
+    if (pHddCtx->cfg_ini->extscan_enabled &&
+        sme_IsFeatureSupportedByFW(EXTENDED_SCAN)) {
         hddLog(LOG1, FL("EXTScan is supported by firmware"));
         fset |= WIFI_FEATURE_EXTSCAN | WIFI_FEATURE_HAL_EPNO;
     }
@@ -2209,6 +2210,10 @@ static int __wlan_hdd_cfg80211_extscan_get_capabilities(struct wiphy *wiphy,
         return -EINVAL;
     }
 
+    if (!pHddCtx->cfg_ini->extscan_enabled) {
+        hddLog(LOGE, FL("extscan not supported"));
+        return -ENOTSUPP;
+    }
     if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
                     data, data_len,
                     wlan_hdd_extscan_config_policy)) {
@@ -2342,6 +2347,10 @@ static int __wlan_hdd_cfg80211_extscan_get_cached_results(struct wiphy *wiphy,
 		return -EINVAL;
 	}
 
+	if (!pHddCtx->cfg_ini->extscan_enabled) {
+		hddLog(LOGE, FL("extscan not supported"));
+		return -ENOTSUPP;
+	}
 	if (nla_parse(tb, PARAM_MAX, data, data_len,
 			wlan_hdd_extscan_config_policy)) {
 		hddLog(LOGE, FL("Invalid ATTR"));
@@ -3078,6 +3087,10 @@ static int __wlan_hdd_cfg80211_extscan_get_valid_channels(struct wiphy *wiphy,
        return -EINVAL;
     }
 
+    if (!pHddCtx->cfg_ini->extscan_enabled) {
+        hddLog(LOGE, FL("extscan not supported"));
+        return -ENOTSUPP;
+    }
     if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
                   data, data_len,
                   wlan_hdd_extscan_config_policy)) {
@@ -3740,6 +3753,11 @@ static int __wlan_hdd_cfg80211_extscan_start(struct wiphy *wiphy,
 		return -EINVAL;
 	}
 
+	if (!pHddCtx->cfg_ini->extscan_enabled) {
+		hddLog(LOGE, FL("extscan not supported"));
+		return -ENOTSUPP;
+	}
+
 	if (nla_parse(tb, PARAM_MAX, data, data_len,
 		wlan_hdd_extscan_config_policy)) {
 		hddLog(LOGE, FL("Invalid ATTR"));
@@ -3943,6 +3961,10 @@ static int __wlan_hdd_cfg80211_extscan_stop(struct wiphy *wiphy,
 		return -EINVAL;
 	}
 
+	if (!pHddCtx->cfg_ini->extscan_enabled) {
+		hddLog(LOGE, FL("extscan not supported"));
+		return -ENOTSUPP;
+	}
 	if (nla_parse(tb, PARAM_MAX, data, data_len,
 			wlan_hdd_extscan_config_policy)) {
 		hddLog(LOGE, FL("Invalid ATTR"));
@@ -4055,6 +4077,10 @@ static int __wlan_hdd_cfg80211_extscan_reset_bssid_hotlist(struct wiphy *wiphy,
         return -EINVAL;
     }
 
+    if (!pHddCtx->cfg_ini->extscan_enabled) {
+        hddLog(LOGE, FL("extscan not supported"));
+        return -ENOTSUPP;
+    }
     if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
                     data, data_len,
                     wlan_hdd_extscan_config_policy)) {
@@ -4180,7 +4206,10 @@ __wlan_hdd_cfg80211_extscan_reset_ssid_hotlist(struct wiphy *wiphy,
 		hddLog(LOGE, FL("HDD context is not valid"));
 		return -EINVAL;
 	}
-
+	if (!hdd_ctx->cfg_ini->extscan_enabled) {
+		hddLog(LOGE, FL("extscan not supported"));
+		return -ENOTSUPP;
+	}
 	if (nla_parse(tb, PARAM_MAX,
 		      data, data_len,
 		      wlan_hdd_extscan_config_policy)) {
@@ -4303,6 +4332,10 @@ static int __wlan_hdd_cfg80211_extscan_reset_significant_change(
     }
 
 
+    if (!pHddCtx->cfg_ini->extscan_enabled) {
+        hddLog(LOGE, FL("extscan not supported"));
+        return -ENOTSUPP;
+    }
     if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
                     data, data_len,
                     wlan_hdd_extscan_config_policy)) {

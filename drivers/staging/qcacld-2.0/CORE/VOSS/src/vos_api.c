@@ -463,6 +463,8 @@ VOS_STATUS vos_open( v_CONTEXT_t *pVosContext, v_SIZE_t hddContextSize )
    macOpenParms.IsRArateLimitEnabled = pHddCtx->cfg_ini->IsRArateLimitEnabled;
 #endif
 
+   macOpenParms.force_target_assert_enabled =
+               pHddCtx->cfg_ini->crash_inject_enabled;
    macOpenParms.apMaxOffloadPeers = pHddCtx->cfg_ini->apMaxOffloadPeers;
 
    macOpenParms.apMaxOffloadReorderBuffs =
@@ -1355,6 +1357,12 @@ v_BOOL_t vos_is_unload_in_progress(VOS_MODULE_ID moduleId,
 	}
 	hdd_ctx = (hdd_context_t *)vos_get_context(VOS_MODULE_ID_HDD,
 						   gpVosContext);
+	if (NULL == hdd_ctx) {
+		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+		"%s: hdd context is NULL", __func__);
+		VOS_ASSERT(0);
+		return 0;
+	}
 
 	return hdd_ctx->isUnloadInProgress;
 }

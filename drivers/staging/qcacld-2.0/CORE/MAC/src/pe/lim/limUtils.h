@@ -617,4 +617,5 @@ void lim_set_vht_caps(tpAniSirGlobal p_mac,
 #endif /* WLAN_FEATURE_11AC */
 
 void lim_set_stads_rtt_cap(tpDphHashNode sta_ds, struct s_ext_cap *ext_cap);
+uint8_t lim_get_80Mhz_center_channel(uint8_t primary_channel);
 #endif /* __LIM_UTILS_H */

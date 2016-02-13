@@ -6305,6 +6305,8 @@ VOS_STATUS WDA_open(v_VOID_t *vos_context, v_VOID_t *os_ctx,
 		WMI_UPDATE_FW_MEM_DUMP_EVENTID,
 		wma_fw_mem_dump_event_handler);
 
+	wmi_set_tgt_assert(wma_handle->wmi_handle,
+			   mac_params->force_target_assert_enabled);
 	/* Firmware debug log */
 	vos_status = dbglog_init(wma_handle->wmi_handle);
 	if (vos_status != VOS_STATUS_SUCCESS) {
@@ -12881,9 +12883,6 @@ static void wma_process_cli_set_cmd(tp_wma_handle wma,
 		case WMI_PDEV_PARAM_BURST_DUR:
 			wma->pdevconfig.burst_dur = privcmd->param_value;
 			break;
-		case WMI_PDEV_PARAM_POWER_GATING_SLEEP:
-			wma->pdevconfig.pwrgating = privcmd->param_value;
-			break;
 		case WMI_PDEV_PARAM_TXPOWER_LIMIT2G:
 			wma->pdevconfig.txpow2g = privcmd->param_value;
 			if ((pMac->roam.configParam.bandCapability ==
@@ -13043,9 +13042,6 @@ int wma_cli_get_command(void *wmapvosContext, int vdev_id,
 			break;
 		case WMI_PDEV_PARAM_TXPOWER_LIMIT5G:
 			ret = wma->pdevconfig.txpow5g;
-			break;
-                case WMI_PDEV_PARAM_POWER_GATING_SLEEP:
-			ret = wma->pdevconfig.pwrgating;
 			break;
                 case WMI_PDEV_PARAM_BURST_ENABLE:
 			ret = wma->pdevconfig.burst_enable;
@@ -30033,3 +30029,23 @@ int wma_runtime_resume_req(WMA_HANDLE handle)
 	return ret;
 }
 #endif
+
+/**
+ * wma_get_vht_ch_width - return vht channel width
+ *
+ * Return: return vht channel width
+ */
+uint32_t wma_get_vht_ch_width(void)
+{
+	uint32_t fw_ch_wd = WNI_CFG_VHT_CHANNEL_WIDTH_80MHZ;
+	v_CONTEXT_t v_ctx =  vos_get_global_context(VOS_MODULE_ID_VOSS, NULL);
+	tp_wma_handle wm_hdl = (tp_wma_handle)vos_get_context(VOS_MODULE_ID_WDA,
+							      v_ctx);
+
+	if (wm_hdl->vht_cap_info & IEEE80211_VHTCAP_SUP_CHAN_WIDTH_160)
+		fw_ch_wd = WNI_CFG_VHT_CHANNEL_WIDTH_160MHZ;
+	else if (wm_hdl->vht_cap_info & IEEE80211_VHTCAP_SUP_CHAN_WIDTH_80_160)
+		fw_ch_wd = WNI_CFG_VHT_CHANNEL_WIDTH_80_PLUS_80MHZ;
+
+	return fw_ch_wd;
+}

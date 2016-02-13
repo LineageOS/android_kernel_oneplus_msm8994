@@ -2508,6 +2508,7 @@ limSendAssocReqMgmtFrame(tpAniSirGlobal   pMac,
     if (psessionEntry->assocReq != NULL) {
         vos_mem_free(psessionEntry->assocReq);
         psessionEntry->assocReq = NULL;
+        psessionEntry->assocReqLen = 0;
     }
 
     if( nAddIELen )
@@ -2523,6 +2524,7 @@ limSendAssocReqMgmtFrame(tpAniSirGlobal   pMac,
     {
         PELOGE(limLog(pMac, LOGE, FL("Unable to allocate memory to store "
                                      "assoc request"));)
+        psessionEntry->assocReqLen = 0;
     }
     else
     {
@@ -2942,6 +2944,7 @@ limSendReassocReqWithFTIEsMgmtFrame(tpAniSirGlobal     pMac,
     {
         vos_mem_free(psessionEntry->assocReq);
         psessionEntry->assocReq = NULL;
+        psessionEntry->assocReqLen = 0;
     }
 
     if( nAddIELen )
@@ -2956,6 +2959,7 @@ limSendReassocReqWithFTIEsMgmtFrame(tpAniSirGlobal     pMac,
     if ( NULL == psessionEntry->assocReq )
     {
         PELOGE(limLog(pMac, LOGE, FL("Unable to allocate memory to store assoc request"));)
+        psessionEntry->assocReqLen = 0;
     }
     else
     {
@@ -2997,6 +3001,7 @@ limSendReassocReqWithFTIEsMgmtFrame(tpAniSirGlobal     pMac,
     {
         vos_mem_free(psessionEntry->assocReq);
         psessionEntry->assocReq = NULL;
+        psessionEntry->assocReqLen = 0;
     }
 
     if (ft_ies_length) {
@@ -3013,6 +3018,7 @@ limSendReassocReqWithFTIEsMgmtFrame(tpAniSirGlobal     pMac,
           }
     } else {
          limLog(pMac, LOG1, FL("FT IEs not present"));
+         psessionEntry->assocReqLen = 0;
     }
 
 #ifdef FEATURE_WLAN_DIAG_SUPPORT
@@ -3363,6 +3369,7 @@ limSendReassocReqMgmtFrame(tpAniSirGlobal     pMac,
     {
         vos_mem_free(psessionEntry->assocReq);
         psessionEntry->assocReq = NULL;
+        psessionEntry->assocReqLen = 0;
     }
 
     if( nAddIELen )
@@ -3377,6 +3384,7 @@ limSendReassocReqMgmtFrame(tpAniSirGlobal     pMac,
     if ( NULL == psessionEntry->assocReq )
     {
         limLog(pMac, LOGE, FL("Unable to alloc mem to store assoc request"));
+        psessionEntry->assocReqLen = 0;
     }
     else
     {
