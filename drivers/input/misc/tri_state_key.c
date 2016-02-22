@@ -12,9 +12,9 @@
 #include <linux/input.h>
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
+#include <linux/proc_fs.h>
 #include <linux/gpio.h>
 #include <linux/gpio_keys.h>
-#include <linux/of_device.h>
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
 
@@ -300,93 +300,142 @@ err:
 
 */
 
-static ssize_t keyCode_slider_top_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static int keyCode_top_show(struct seq_file *seq, void *offset)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n", keyCode_slider_top);
+    seq_printf(seq, "%d\n", keyCode_slider_top);
+    return 0;
 }
 
-static ssize_t keyCode_slider_top_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t keyCode_top_write(struct file *file, const char __user *page, size_t t, loff_t *lo)
 {
 	int data;
+	char buf[10];
+
+	if (copy_from_user(buf, page, t))
+	{
+		dev_err(switch_data->dev, "read proc input error.\n");
+		return t;
+	}
 
 	if (sscanf(buf, "%d", &data) != 1)
-		return -EINVAL;
+		return t;
 	if (data < 600 || data > 603)
-		return -EINVAL;
+		return t;
 
 	keyCode_slider_top = data;
 	if (current_mode == 1)
 		send_input(keyCode_slider_top);
 
-	return strnlen(buf, count);
+	return t;
 }
 
-static ssize_t keyCode_slider_middle_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static int keyCode_top_open(struct inode *inode, struct file *file)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n", keyCode_slider_middle);
+	return single_open(file, keyCode_top_show, inode->i_private);
 }
 
-static ssize_t keyCode_slider_middle_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
+const struct file_operations proc_keyCode_top =
+{
+	.owner		= THIS_MODULE,
+	.open		= keyCode_top_open,
+	.read		= seq_read,
+	.write		= keyCode_top_write,
+	.llseek 	= seq_lseek,
+	.release	= single_release,
+};
+
+static int keyCode_middle_show(struct seq_file *seq, void *offset)
+{
+    seq_printf(seq, "%d\n", keyCode_slider_middle);
+    return 0;
+}
+
+static ssize_t keyCode_middle_write(struct file *file, const char __user *page, size_t t, loff_t *lo)
 {
 	int data;
+	char buf[10];
+
+	if (copy_from_user(buf, page, t))
+	{
+		dev_err(switch_data->dev, "read proc input error.\n");
+		return t;
+	}
 
 	if (sscanf(buf, "%d", &data) != 1)
-		return -EINVAL;
+		return t;
 	if (data < 600 || data > 603)
-		return -EINVAL;
+		return t;
 
 	keyCode_slider_middle = data;
 	if (current_mode == 2)
 		send_input(keyCode_slider_middle);
 
-	return strnlen(buf, count);
+	return t;
 }
 
-static ssize_t keyCode_slider_bottom_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static int keyCode_middle_open(struct inode *inode, struct file *file)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n", keyCode_slider_bottom);
+	return single_open(file, keyCode_middle_show, inode->i_private);
 }
 
-static ssize_t keyCode_slider_bottom_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
+const struct file_operations proc_keyCode_middle =
+{
+	.owner		= THIS_MODULE,
+	.open		= keyCode_middle_open,
+	.read		= seq_read,
+	.write		= keyCode_middle_write,
+	.llseek 	= seq_lseek,
+	.release	= single_release,
+};
+
+static int keyCode_bottom_show(struct seq_file *seq, void *offset)
+{
+    seq_printf(seq, "%d\n", keyCode_slider_bottom);
+    return 0;
+}
+
+static ssize_t keyCode_bottom_write(struct file *file, const char __user *page, size_t t, loff_t *lo)
 {
 	int data;
+	char buf[10];
+
+	if (copy_from_user(buf, page, t))
+	{
+		dev_err(switch_data->dev, "read proc input error.\n");
+		return t;
+	}
 
 	if (sscanf(buf, "%d", &data) != 1)
-		return -EINVAL;
+		return t;
 	if (data < 600 || data > 603)
-		return -EINVAL;
+		return t;
 
 	keyCode_slider_bottom = data;
 	if (current_mode == 3)
 		send_input(keyCode_slider_bottom);
 
-	return strnlen(buf, count);
+	return t;
 }
 
-/* sysfs attributes */
-static struct device_attribute keyCode_attrs[] = {
-	__ATTR(keyCode_top, (S_IRUGO | S_IWUSR | S_IWGRP),
-			keyCode_slider_top_show,
-			keyCode_slider_top_store),
-	__ATTR(keyCode_middle, (S_IRUGO | S_IWUSR | S_IWGRP),
-			keyCode_slider_middle_show,
-			keyCode_slider_middle_store),
-	__ATTR(keyCode_bottom, (S_IRUGO | S_IWUSR | S_IWGRP),
-			keyCode_slider_bottom_show,
-			keyCode_slider_bottom_store),
+static int keyCode_bottom_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, keyCode_bottom_show, inode->i_private);
+}
+
+const struct file_operations proc_keyCode_bottom =
+{
+	.owner		= THIS_MODULE,
+	.open		= keyCode_bottom_open,
+	.read		= seq_read,
+	.write		= keyCode_bottom_write,
+	.llseek 	= seq_lseek,
+	.release	= single_release,
 };
 
 static int tristate_dev_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-
-	int i;
+	struct proc_dir_entry *procdir;
 	int error=0;
 
 	//void __iomem *cfg_reg;
@@ -531,14 +580,10 @@ static int tristate_dev_probe(struct platform_device *pdev)
         //report the first switch
         //switch_dev_work(&switch_data->work);
 
-	for (i = 0; i < ARRAY_SIZE(keyCode_attrs); i++) {
-		error = sysfs_create_file(&switch_data->dev->kobj,
-				&keyCode_attrs[i].attr);
-		if (error < 0) {
-			dev_err(dev, "sysfs creation failed\n");
-			goto err_sysfs;
-		}
-	}
+	procdir = proc_mkdir("tri-state-key", NULL);
+	proc_create_data("keyCode_top", 0666, procdir, &proc_keyCode_top, NULL);
+	proc_create_data("keyCode_middle", 0666, procdir, &proc_keyCode_middle, NULL);
+	proc_create_data("keyCode_bottom", 0666, procdir, &proc_keyCode_bottom, NULL);
 
         return 0;
 
@@ -555,10 +600,6 @@ err_switch_dev_register:
 err_input_device_register:
 	input_unregister_device(switch_data->input);
 	input_free_device(switch_data->input);
-err_sysfs:
-	for (i--; i >= 0; i--)
-		sysfs_remove_file(&switch_data->dev->kobj,
-				&keyCode_attrs[i].attr);
 
 	return error;
 }
