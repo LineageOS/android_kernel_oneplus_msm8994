@@ -605,9 +605,9 @@
 				qcom,idx-len = <11>;
 
 				qcom,lut-flags = <0x1f>;
-				qcom,ramp-step-ms = <100>;
-				qcom,pause-lo = <2000>;
-				qcom,pause-hi = <1000>;
+				qcom,ramp-step-ms = <20>;
+				qcom,pause-lo = <500>;
+				qcom,pause-hi = <500>;
 
 				linux,name = "red";
 				/*linux,default-trigger =
@@ -623,19 +623,15 @@
 				qcom,pwm-us = <1000>;
 				qcom,max-current = <12>;
 				qcom,default-state = "off";
-				/*
-				qcom,duty-pcts = [00 05 0A 0f 14 19 1d 23 28 2c
-								32 37 3b 41 45 4a 50 55 5a 64];
-				*/
 				qcom,duty-pcts = [00 05 0a 0f 14 1d 28 32 3c 4b 64];
 				qcom,duty-ms = <20>;
-				qcom,start-idx = <13>;
+				qcom,start-idx = <1>;
 				qcom,idx-len = <11>;
 
 				qcom,lut-flags = <0x1f>;
-				qcom,ramp-step-ms = <100>;
-				qcom,pause-lo = <2000>;
-				qcom,pause-hi = <1000>;
+				qcom,ramp-step-ms = <20>;
+				qcom,pause-lo = <500>;
+				qcom,pause-hi = <500>;
 
 				linux,name = "green";
 				/*linux,default-trigger = "battery-full";*/
@@ -655,9 +651,9 @@
 				qcom,idx-len = <11>;
 
 				qcom,lut-flags = <0x1f>;
-				qcom,ramp-step-ms = <100>;
-				qcom,pause-lo = <2000>;
-				qcom,pause-hi = <1000>;
+				qcom,ramp-step-ms = <20>;
+				qcom,pause-lo = <500>;
+				qcom,pause-hi = <500>;
 
 				qcom,default-state = "off";
 				linux,name = "blue";
