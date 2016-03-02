@@ -61,6 +61,21 @@
 
 #define MAX_VFE 2
 
+#define RETURN_IF_DUAL_RES_NULL(dual_vfe_res)	\
+if (!dual_vfe_res->vfe_base[ISP_VFE0] ||	\
+	!dual_vfe_res->axi_data[ISP_VFE0] ||	\
+	!dual_vfe_res->vfe_base[ISP_VFE1] ||	\
+	!dual_vfe_res->axi_data[ISP_VFE1]) {	\
+	pr_err("%s:%d failed vfe0 %p %p vfe %p %p\n",	\
+		__func__, __LINE__,	\
+		dual_vfe_res->vfe_base[ISP_VFE0],	\
+		dual_vfe_res->axi_data[ISP_VFE0],	\
+		dual_vfe_res->vfe_base[ISP_VFE1],	\
+		dual_vfe_res->axi_data[ISP_VFE1]);	\
+		return -1; \
+} 	\
+
+
 struct vfe_device;
 struct msm_vfe_axi_stream;
 struct msm_vfe_stats_stream;

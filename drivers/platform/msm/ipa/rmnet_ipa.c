@@ -1263,6 +1263,11 @@ static int ipa_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 					rmnet_mux_val.mux_id);
 				return rc;
 			}
+			if (rmnet_index >= MAX_NUM_OF_MUX_CHANNEL) {
+				IPAWANERR("Exceed mux_channel limit(%d)\n",
+				rmnet_index);
+				return -EFAULT;
+			}
 			IPAWANDBG("ADD_MUX_CHANNEL(%d, name: %s)\n",
 			extend_ioctl_data.u.rmnet_mux_val.mux_id,
 			extend_ioctl_data.u.rmnet_mux_val.vchannel_name);
@@ -2046,6 +2051,13 @@ static int ssr_notifier_cb(struct notifier_block *this,
 			if (atomic_read(&is_initialized))
 				platform_driver_unregister(&rmnet_ipa_driver);
 			pr_info("IPA BEFORE_SHUTDOWN handling is complete\n");
+			return NOTIFY_DONE;
+		}
+		if (SUBSYS_AFTER_SHUTDOWN == code) {
+			pr_info("IPA received MPSS AFTER_SHUTDOWN\n");
+			if (atomic_read(&is_ssr))
+				ipa_q6_pipe_reset();
+			pr_info("IPA AFTER_SHUTDOWN handling is complete\n");
 			return NOTIFY_DONE;
 		}
 		if (SUBSYS_AFTER_POWERUP == code) {
