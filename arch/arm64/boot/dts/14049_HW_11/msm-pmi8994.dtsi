@@ -608,7 +608,6 @@
 			label = "rgb";
 			status = "okay";
 
-			/*#ifndef VENDOR_EDIT //shankai@bsp.driver 2015-02-26 modify for rgb blink feature*/
 			qcom,rgb_0 {
 				label = "rgb";
 				qcom,id = <3>;
@@ -617,10 +616,10 @@
 				qcom,pwm-us = <1000>;
 				qcom,max-current = <12>;
 				qcom,default-state = "off";
-				qcom,duty-pcts = [00 05 0a 0f 14 1d 28 32 3c 4b 64];
-				qcom,duty-ms = <20>;
-				qcom,start-idx = <1>;
-				qcom,idx-len = <11>;
+				qcom,duty-pcts = [00 0c 19 25 32 48 55 64];
+				qcom,duty-ms = <50>;
+				qcom,start-idx = <0>;
+				qcom,idx-len = <8>;
 
 				qcom,lut-flags = <0x1f>;
 				qcom,ramp-step-ms = <100>;
@@ -628,8 +627,6 @@
 				qcom,pause-hi = <1000>;
 
 				linux,name = "red";
-				/*linux,default-trigger =
-					"battery-charging";*/
 				qcom,use-blink;
 			};
 
@@ -641,14 +638,10 @@
 				qcom,pwm-us = <1000>;
 				qcom,max-current = <12>;
 				qcom,default-state = "off";
-				/*
-				qcom,duty-pcts = [00 05 0A 0f 14 19 1d 23 28 2c
-								32 37 3b 41 45 4a 50 55 5a 64];
-				*/
-				qcom,duty-pcts = [00 05 0a 0f 14 1d 28 32 3c 4b 64];
-				qcom,duty-ms = <20>;
-				qcom,start-idx = <13>;
-				qcom,idx-len = <11>;
+				qcom,duty-pcts = [00 0c 19 25 32 48 55 64];
+				qcom,duty-ms = <50>;
+				qcom,start-idx = <8>;
+				qcom,idx-len = <8>;
 
 				qcom,lut-flags = <0x1f>;
 				qcom,ramp-step-ms = <100>;
@@ -656,7 +649,6 @@
 				qcom,pause-hi = <1000>;
 
 				linux,name = "green";
-				/*linux,default-trigger = "battery-full";*/
 				qcom,use-blink;
 			};
 
@@ -667,22 +659,20 @@
 				pwms = <&pmi8994_pwm_1 0 0>;
 				qcom,pwm-us = <1000>;
 				qcom,max-current = <12>;
-				qcom,duty-pcts = [00 05 0a 0f 14 1d 28 32 3c 4b 64];
-				qcom,duty-ms = <20>;
-				qcom,start-idx = <13>;
-				qcom,idx-len = <11>;
+				qcom,default-state = "off";
+				qcom,duty-pcts = [00 0c 19 25 32 48 55 64];
+				qcom,duty-ms = <50>;
+				qcom,start-idx = <16>;
+				qcom,idx-len = <8>;
 
 				qcom,lut-flags = <0x1f>;
 				qcom,ramp-step-ms = <100>;
 				qcom,pause-lo = <2000>;
 				qcom,pause-hi = <1000>;
 
-				qcom,default-state = "off";
 				linux,name = "blue";
 				qcom,use-blink;
-				linux,default-trigger = "boot-indication";
 			};
-		/*#end VENDOR_EDIT*/
 		};
 
 		qcom,leds@d300 {
