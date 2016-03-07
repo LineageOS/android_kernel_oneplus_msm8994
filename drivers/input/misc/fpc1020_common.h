@@ -38,9 +38,6 @@
 /* -------------------------------------------------------------------- */
 extern const bool target_little_endian;
 
-extern unsigned int nav_switch;
-extern unsigned int enable_keys;
-
 #define FPC1020_DEV_NAME                        "fpc1020"
 #define FPC1020_TOUCH_PAD_DEV_NAME              "fpc1020tp"
 

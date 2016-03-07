@@ -218,6 +218,7 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 
 unsigned int nav_switch = 1;
 unsigned int enable_keys = 1;
+unsigned int ap_tz_switch = 1;
 
 /* -------------------------------------------------------------------- */
 /* External interface							*/
@@ -407,18 +408,6 @@ static int fpc1020_nav_switch_open(struct inode *inode, struct file *file)
 	return single_open(file, fpc1020_nav_switch_show, fpc1020);
 }
 
-static void write_nav_switch(fpc1020_data_t *fpc1020)
-{
-	if(fpc1020->nav.enabled != nav_switch) {
-		fpc1020_input_enable(fpc1020, nav_switch);
-		if (nav_switch) {
-			fpc1020_start_navigation(fpc1020);
-		} else {
-			fpc1020_worker_goto_idle(fpc1020);
-		}
-	}
-}
-
 static ssize_t fpc1020_nav_switch_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
 	fpc1020_data_t *fpc1020 = (fpc1020_data_t*)PDE(file->f_path.dentry->d_inode)->data;
@@ -426,15 +415,13 @@ static ssize_t fpc1020_nav_switch_write(struct file *file, const char __user *bu
 	if (!fpc1020) {
 		return -EFAULT;
 	}
-    #if 0
+#if 0
 	if (copy_from_user(&nav_switch, buffer, sizeof(nav_switch))) 
 		return -EFAULT;
-    #else
-    sscanf(buffer, "%d", &nav_switch);
-    #endif
+#else
+	sscanf(buffer, "%d", &nav_switch);
+#endif
 	dev_err(&fpc1020->spi->dev, "nav_switch change to %d\n", nav_switch);
-
-	write_nav_switch(fpc1020);
 
 	return count;
 }
@@ -579,16 +566,23 @@ static ssize_t fpc1020_home_switch_store(struct device *dev, struct device_attri
 
 	mutex_lock(&mLock);
 
-    nav_switch = simple_strtoul(buf, &after, 10);
-    //int rc = -1;
+	ap_tz_switch = simple_strtoul(buf, &after, 10);
+	//int rc = -1;
 
 	fpc1020 = dev_get_drvdata(dev);
 
-	dev_err(&fpc1020->spi->dev, "nav_switch change to %d\n", nav_switch);
+	dev_err(&fpc1020->spi->dev, "ap_tz_switch change to %d\n", ap_tz_switch);
 
-	write_nav_switch(fpc1020);
+	if(fpc1020->nav.enabled != ap_tz_switch) {
+		fpc1020_input_enable(fpc1020, ap_tz_switch);
+		if (ap_tz_switch) {
+			fpc1020_start_navigation(fpc1020);
+		} else {
+			fpc1020_worker_goto_idle(fpc1020);
+		}
+	}
 
-    mutex_unlock(&mLock);
+	mutex_unlock(&mLock);
 	return count;
 }
 static ssize_t fpc1020_home_switch_show(struct device *dev, struct device_attribute *attr,

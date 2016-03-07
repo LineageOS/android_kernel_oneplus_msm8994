@@ -81,6 +81,10 @@ static int capture_nav_image(fpc1020_data_t *fpc1020);
 #define BEST_IMAGE_WIDTH	4
 #define BEST_IMAGE_HEIGHT	6
 
+extern unsigned int enable_keys;
+extern unsigned int nav_switch;
+extern unsigned int ap_tz_switch;
+
 enum {
 	FNGR_ST_NONE = 0,
 	FNGR_ST_DETECTED,
@@ -918,15 +922,17 @@ static int fpc1020_wait_finger_present_lpm(fpc1020_data_t *fpc1020)
 			}
 			#else
 			dev_err(&fpc1020->spi->dev,"%s HOME DOWN !  fpc1020->to_power(%d)\n", __func__,fpc1020->to_power);
-			if(fpc1020->to_power != true){
-                input_report_key(fpc1020->input_dev,
-						FPC1020_KEY_FINGER_PRESS, 1);
-			    input_sync(fpc1020->input_dev);
-			}else if (enable_keys) {
-			    wake_lock_timeout(&fpc1020_wake_lock,5*HZ);
-			    input_report_key(fpc1020->input_dev,
-						KEY_HOME, 1);
-			    input_sync(fpc1020->input_dev);
+			if ((enable_keys && nav_switch) || !ap_tz_switch) {
+				if(fpc1020->to_power != true) {
+					input_report_key(fpc1020->input_dev,
+							FPC1020_KEY_FINGER_PRESS, 1);
+					input_sync(fpc1020->input_dev);
+				} else {
+					wake_lock_timeout(&fpc1020_wake_lock,5*HZ);
+					input_report_key(fpc1020->input_dev,
+							KEY_HOME, 1);
+					input_sync(fpc1020->input_dev);
+				}
 			}
 			while (!finger_up && (error >= 0)) {
 
@@ -958,16 +964,18 @@ static int fpc1020_wait_finger_present_lpm(fpc1020_data_t *fpc1020)
             		{
             			finger_up = true;
             			dev_err(&fpc1020->spi->dev,"%s HOME UP !  fpc1020->to_power(%d)\n", __func__,fpc1020->to_power);
-                        if(fpc1020->to_power != true){
-                            input_report_key(fpc1020->input_dev,
-                                FPC1020_KEY_FINGER_PRESS, 0);
-                            input_sync(fpc1020->input_dev);
-                        }else if (enable_keys) {
-                            input_report_key(fpc1020->input_dev,
-                                KEY_HOME, 0);
-                            input_sync(fpc1020->input_dev);
-                            //wake_unlock(&fpc1020_wake_lock);
-                        }
+			if ((enable_keys && nav_switch) || !ap_tz_switch) {
+				if(fpc1020->to_power != true){
+					input_report_key(fpc1020->input_dev,
+							FPC1020_KEY_FINGER_PRESS, 0);
+					input_sync(fpc1020->input_dev);
+				} else {
+					input_report_key(fpc1020->input_dev,
+							KEY_HOME, 0);
+					input_sync(fpc1020->input_dev);
+					//wake_unlock(&fpc1020_wake_lock);
+				}
+			}
             		}
             		else
             			msleep(FPC1020_CAPTURE_WAIT_FINGER_DELAY_MS);

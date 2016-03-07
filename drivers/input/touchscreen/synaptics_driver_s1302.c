@@ -55,7 +55,6 @@
 #include <linux/input/mt.h>
 
 #include "synaptics_s1302_redremote.h"
-#include "../misc/fpc1020_common.h"
 #include <linux/boot_mode.h>
 #include <linux/project_info.h>
 /*------------------------------------------------Global Define--------------------------------------------*/
@@ -165,6 +164,9 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 #endif
 static int synaptics_soft_reset(struct synaptics_ts_data *ts);
 static void synaptics_hard_reset(struct synaptics_ts_data *ts);
+
+extern unsigned int enable_keys;
+extern unsigned int nav_switch;
 
 /*-------------------------------Using Struct----------------------------------*/
 static const struct i2c_device_id synaptics_ts_id[] = {
