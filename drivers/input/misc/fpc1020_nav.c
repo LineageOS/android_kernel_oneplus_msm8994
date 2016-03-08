@@ -84,6 +84,7 @@ static int capture_nav_image(fpc1020_data_t *fpc1020);
 extern unsigned int enable_keys;
 extern unsigned int nav_switch;
 extern unsigned int ap_tz_switch;
+extern unsigned int ignore_home_press;
 
 enum {
 	FNGR_ST_NONE = 0,
@@ -922,7 +923,7 @@ static int fpc1020_wait_finger_present_lpm(fpc1020_data_t *fpc1020)
 			}
 			#else
 			dev_err(&fpc1020->spi->dev,"%s HOME DOWN !  fpc1020->to_power(%d)\n", __func__,fpc1020->to_power);
-			if ((enable_keys && nav_switch) || !ap_tz_switch) {
+			if (((enable_keys && nav_switch) || !ap_tz_switch) && !ignore_home_press) {
 				if(fpc1020->to_power != true) {
 					input_report_key(fpc1020->input_dev,
 							FPC1020_KEY_FINGER_PRESS, 1);
@@ -964,7 +965,7 @@ static int fpc1020_wait_finger_present_lpm(fpc1020_data_t *fpc1020)
             		{
             			finger_up = true;
             			dev_err(&fpc1020->spi->dev,"%s HOME UP !  fpc1020->to_power(%d)\n", __func__,fpc1020->to_power);
-			if ((enable_keys && nav_switch) || !ap_tz_switch) {
+			if (((enable_keys && nav_switch) || !ap_tz_switch) && !ignore_home_press) {
 				if(fpc1020->to_power != true){
 					input_report_key(fpc1020->input_dev,
 							FPC1020_KEY_FINGER_PRESS, 0);

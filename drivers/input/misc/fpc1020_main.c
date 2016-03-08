@@ -219,6 +219,7 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 unsigned int nav_switch = 1;
 unsigned int enable_keys = 1;
 unsigned int ap_tz_switch = 1;
+unsigned int ignore_home_press = 0;
 
 /* -------------------------------------------------------------------- */
 /* External interface							*/
@@ -581,6 +582,12 @@ static ssize_t fpc1020_home_switch_store(struct device *dev, struct device_attri
 			fpc1020_worker_goto_idle(fpc1020);
 		}
 	}
+
+	if (ap_tz_switch) {
+		ignore_home_press = 1;
+		msleep(500);
+	}
+	ignore_home_press = 0;
 
 	mutex_unlock(&mLock);
 	return count;
