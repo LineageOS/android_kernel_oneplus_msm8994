@@ -134,7 +134,7 @@ struct test_header {
 
 // carlo@oneplus.net 2015-05-25, begin.
 #ifdef VENDOR_EDIT
-#define KEY_DOUBLE_TAP          KEY_POWER // double tap to wake
+#define KEY_DOUBLE_TAP          KEY_WAKEUP // double tap to wake
 #define KEY_GESTURE_CIRCLE      250 // draw circle to lunch camera
 #define KEY_GESTURE_TWO_SWIPE   251 // swipe two finger vertically to play/pause
 #define KEY_GESTURE_V           252 // draw v to toggle flashlight
@@ -898,7 +898,7 @@ static int synaptics_enable_interrupt(struct synaptics_ts_data *ts, int enable)
 	int ret;
 	uint8_t abs_status_int;
 
-	ret = synaptics_rmi4_i2c_write_byte(ts->client, 0xff, 0x0); 
+	ret = synaptics_rmi4_i2c_write_byte(ts->client, 0xff, 0x0);
 	if( ret < 0 ) {
 		TPDTM_DMESG("synaptics_enable_interrupt: select page failed ret = %d\n",
 		    ret);
@@ -913,8 +913,8 @@ static int synaptics_enable_interrupt(struct synaptics_ts_data *ts, int enable)
 			return -1;
 		}
 	} else {
-		abs_status_int = 0x0;		
-	}	
+		abs_status_int = 0x0;
+	}
 	ret = synaptics_rmi4_i2c_write_byte(ts->client, F01_RMI_CTRL00+1, abs_status_int);
 	if( ret < 0 ) {
 		TPDTM_DMESG("%s: enable or disable abs \
@@ -922,7 +922,7 @@ static int synaptics_enable_interrupt(struct synaptics_ts_data *ts, int enable)
 		return -1;
 	}
 	ret = synaptics_rmi4_i2c_read_byte(ts->client, F01_RMI_CTRL00+1);
-	return 0;	
+	return 0;
 }
 
 static void delay_qt_ms(unsigned long  w_ms)
