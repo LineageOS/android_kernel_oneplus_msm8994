@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2016,2017  The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1467,6 +1467,7 @@ static int ngd_slim_probe(struct platform_device *pdev)
 	mutex_init(&dev->tx_lock);
 	mutex_init(&dev->ssr_lock);
 	mutex_init(&dev->tx_buf_lock);
+	mutex_init(&dev->ssr_lock);
 	spin_lock_init(&dev->rx_lock);
 	dev->ee = 1;
 	dev->irq = irq->start;
