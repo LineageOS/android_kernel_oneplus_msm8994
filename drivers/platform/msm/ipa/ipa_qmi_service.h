@@ -36,6 +36,7 @@
 	pr_err(DEV_NAME " %s:%d " fmt, __func__, __LINE__, ## args)
 
 extern struct ipa_qmi_context *ipa_qmi_ctx;
+extern struct mutex ipa_qmi_lock;
 
 struct ipa_qmi_context {
 struct ipa_ioc_ext_intf_prop q6_ul_filter_rule[MAX_NUM_Q6_RULE];
@@ -46,6 +47,7 @@ struct ipa_install_fltr_rule_req_msg_v01
 int num_ipa_fltr_installed_notif_req_msg;
 struct ipa_fltr_installed_notif_req_msg_v01
 		ipa_fltr_installed_notif_req_msg_cache[MAX_NUM_QMI_RULE_CACHE];
+bool modem_cfg_emb_pipe_flt;
 };
 
 struct rmnet_mux_val {
@@ -56,35 +58,6 @@ struct rmnet_mux_val {
 	bool mux_hdr_set;
 	uint32_t  hdr_hdl;
 };
-
-int ipa_qmi_service_init(uint32_t wan_platform_type);
-void ipa_qmi_service_exit(void);
-
-/* sending filter-install-request to modem*/
-int qmi_filter_request_send(struct ipa_install_fltr_rule_req_msg_v01 *req);
-
-/* sending filter-installed-notify-request to modem*/
-int qmi_filter_notify_send(struct ipa_fltr_installed_notif_req_msg_v01 *req);
-
-int qmi_enable_force_clear_datapath_send(
-	struct ipa_enable_force_clear_datapath_req_msg_v01 *req);
-int qmi_disable_force_clear_datapath_send(
-	struct ipa_disable_force_clear_datapath_req_msg_v01 *req);
-
-int copy_ul_filter_rule_to_ipa(struct ipa_install_fltr_rule_req_msg_v01
-		*rule_req, uint32_t *rule_hdl);
-
-int wwan_update_mux_channel_prop(void);
-
-int wan_ioctl_init(void);
-
-void wan_ioctl_stop_qmi_messages(void);
-
-void wan_ioctl_enable_qmi_messages(void);
-
-void wan_ioctl_deinit(void);
-
-void ipa_qmi_stop_workqueues(void);
 
 int rmnet_ipa_poll_tethering_stats(struct wan_ioctl_poll_tethering_stats *data);
 int rmnet_ipa_set_data_quota(struct wan_ioctl_set_data_quota *data);
@@ -101,6 +74,8 @@ int ipa_qmi_get_network_stats(struct ipa_get_apn_data_stats_req_msg_v01 *req,
 int ipa_qmi_set_data_quota(struct ipa_set_data_usage_quota_req_msg_v01 *req);
 int ipa_qmi_stop_data_qouta(void);
 void ipa_q6_handshake_complete(bool);
+void ipa_qmi_init(void);
+void ipa_qmi_cleanup(void);
 
 extern struct elem_info ipa_init_modem_driver_req_msg_data_v01_ei[];
 extern struct elem_info ipa_init_modem_driver_resp_msg_data_v01_ei[];
@@ -136,9 +111,176 @@ extern struct elem_info ipa_stop_data_usage_quota_resp_msg_data_v01_ei[];
 struct ipa_rmnet_context {
 	bool ipa_rmnet_ssr;
 	u64 polling_interval;
-	uint32_t metered_mux_id;
+	u32 metered_mux_id;
 };
 
 extern struct ipa_rmnet_context ipa_rmnet_ctx;
-#endif /* IPA_QMI_SERVICE_H
- */
+
+#ifdef CONFIG_RMNET_IPA
+
+int ipa_qmi_service_init(uint32_t wan_platform_type);
+
+void ipa_qmi_service_exit(void);
+
+/* sending filter-install-request to modem*/
+int qmi_filter_request_send(struct ipa_install_fltr_rule_req_msg_v01 *req);
+
+/* sending filter-installed-notify-request to modem*/
+int qmi_filter_notify_send(struct ipa_fltr_installed_notif_req_msg_v01 *req);
+
+/* voting for bus BW to ipa_rm*/
+int vote_for_bus_bw(uint32_t *bw_mbps);
+
+int qmi_enable_force_clear_datapath_send(
+	struct ipa_enable_force_clear_datapath_req_msg_v01 *req);
+
+int qmi_disable_force_clear_datapath_send(
+	struct ipa_disable_force_clear_datapath_req_msg_v01 *req);
+
+int copy_ul_filter_rule_to_ipa(struct ipa_install_fltr_rule_req_msg_v01
+	*rule_req, uint32_t *rule_hdl);
+
+int wwan_update_mux_channel_prop(void);
+
+int wan_ioctl_init(void);
+
+void wan_ioctl_stop_qmi_messages(void);
+
+void wan_ioctl_enable_qmi_messages(void);
+
+void wan_ioctl_deinit(void);
+
+void ipa_qmi_stop_workqueues(void);
+
+#else /* CONFIG_RMNET_IPA */
+
+static inline int ipa_qmi_service_init(uint32_t wan_platform_type)
+{
+	return -EPERM;
+}
+
+static inline void ipa_qmi_service_exit(void)
+{
+	return;
+}
+
+/* sending filter-install-request to modem*/
+static inline int qmi_filter_request_send(
+	struct ipa_install_fltr_rule_req_msg_v01 *req)
+{
+	return -EPERM;
+}
+
+/* sending filter-installed-notify-request to modem*/
+static inline int qmi_filter_notify_send(
+	struct ipa_fltr_installed_notif_req_msg_v01 *req)
+{
+	return -EPERM;
+}
+
+static inline int qmi_enable_force_clear_datapath_send(
+	struct ipa_enable_force_clear_datapath_req_msg_v01 *req)
+{
+	return -EPERM;
+}
+
+static inline int qmi_disable_force_clear_datapath_send(
+	struct ipa_disable_force_clear_datapath_req_msg_v01 *req)
+{
+	return -EPERM;
+}
+
+static inline int copy_ul_filter_rule_to_ipa(
+	struct ipa_install_fltr_rule_req_msg_v01 *rule_req, uint32_t *rule_hdl)
+{
+	return -EPERM;
+}
+
+static inline int wwan_update_mux_channel_prop(void)
+{
+	return -EPERM;
+}
+
+static inline int wan_ioctl_init(void)
+{
+	return -EPERM;
+}
+
+static inline void wan_ioctl_stop_qmi_messages(void)
+{
+	return;
+}
+
+static inline void wan_ioctl_enable_qmi_messages(void)
+{
+	return;
+}
+
+static inline void wan_ioctl_deinit(void)
+{
+	return;
+}
+
+static inline void ipa_qmi_stop_workqueues(void)
+{
+	return;
+}
+
+static inline int vote_for_bus_bw(uint32_t *bw_mbps)
+{
+	return -EPERM;
+}
+
+int rmnet_ipa_poll_tethering_stats(struct wan_ioctl_poll_tethering_stats *data)
+{
+	return -EPERM;
+}
+
+int rmnet_ipa_set_data_quota(struct wan_ioctl_set_data_quota *data)
+{
+	return -EPERM;
+}
+
+void ipa_broadcast_quota_reach_ind(uint8_t mux_id)
+{
+	return;
+}
+
+int ipa_qmi_get_data_stats(struct ipa_get_data_stats_req_msg_v01 *req,
+	struct ipa_get_data_stats_resp_msg_v01 *resp);
+{
+	return -EPERM;
+}
+
+int ipa_qmi_get_network_stats(struct ipa_get_apn_data_stats_req_msg_v01 *req,
+	struct ipa_get_apn_data_stats_resp_msg_v01 *resp);
+{
+	return -EPERM;
+}
+
+int ipa_qmi_set_data_quota(struct ipa_set_network_quota_req_msg_v01 *req)
+{
+	return -EPERM;
+}
+
+int ipa_qmi_stop_data_qouta(void)
+{
+	return -EPERM;
+}
+
+void ipa_q6_handshake_complete(bool)
+{
+	return;
+}
+
+void ipa_qmi_init(void)
+{
+}
+
+void ipa_qmi_cleanup(void)
+{
+}
+
+#endif /* CONFIG_RMNET_IPA */
+
+#endif /* IPA_QMI_SERVICE_H */

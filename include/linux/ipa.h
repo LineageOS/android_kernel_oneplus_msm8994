@@ -229,6 +229,13 @@ struct ipa_ep_cfg_mode {
  *			aggregation closure. Valid for Output Pipes only (IPA
  *			Producer). EOF affects only Pipes configured for
  *			generic aggregation.
+ * @aggr_sw_eof_active: 0: EOF does not close aggregation. HW closes
+ *			aggregation (sends EOT) only based on its aggregation config
+ *			(byte/time limit, etc).
+ *			1: EOF closes aggregation in addition to HW based
+ *			aggregation closure. Valid for Output Pipes only (IPA
+ *			Producer). EOF affects only Pipes configured for generic
+ *			aggregation.
  */
 struct ipa_ep_cfg_aggr {
 	enum ipa_aggr_en_type aggr_en;
@@ -236,6 +243,7 @@ struct ipa_ep_cfg_aggr {
 	u32 aggr_byte_limit;
 	u32 aggr_time_limit;
 	u32 aggr_pkt_limit;
+	bool aggr_sw_eof_active;
 };
 
 /**
@@ -552,6 +560,7 @@ enum ipa_voltage_level {
 	IPA_VOLTAGE_UNSPECIFIED,
 	IPA_VOLTAGE_SVS = IPA_VOLTAGE_UNSPECIFIED,
 	IPA_VOLTAGE_NOMINAL,
+	IPA_VOLTAGE_TURBO,
 	IPA_VOLTAGE_MAX,
 };
 
@@ -754,6 +763,7 @@ struct IpaHwBamStats_t {
 	u32 bamFifoEmpty;
 	u32 bamFifoUsageHigh;
 	u32 bamFifoUsageLow;
+	u32 bamUtilCount;
 } __packed;
 
 /**
@@ -773,6 +783,7 @@ struct IpaHwRingStats_t {
 	u32 ringEmpty;
 	u32 ringUsageHigh;
 	u32 ringUsageLow;
+	u32 RingUtilCount;
 } __packed;
 
 /**
@@ -797,6 +808,7 @@ struct IpaHwStatsWDIRxInfoData_t {
 	u32 num_bam_int_handled;
 	u32 num_db;
 	u32 num_unexpected_db;
+	u32 num_pkts_in_dis_uninit_state;
 	u32 reserved1;
 	u32 reserved2;
 } __packed;
@@ -828,6 +840,7 @@ struct IpaHwStatsWDITxInfoData_t {
 	u32 num_bam_int_handled;
 	u32 num_bam_int_in_non_runnning_state;
 	u32 num_qmb_int_handled;
+	u32 num_bam_int_handled_while_wait_for_bam;
 } __packed;
 
 /**
@@ -857,6 +870,19 @@ struct ipa_wdi_ul_params {
 };
 
 /**
+ * struct  ipa_wdi_ul_params_smmu - WDI_RX configuration (with WLAN SMMU)
+ * @rdy_ring: SG table describing the Rx ring (containing Rx buffers)
+ * @rdy_ring_size: size of the Rx ring in bytes
+ * @rdy_ring_rp_pa: physical address of the location through which IPA uc is
+ * expected to communicate about the Read pointer into the Rx Ring
+ */
+struct ipa_wdi_ul_params_smmu {
+	struct sg_table rdy_ring;
+	u32 rdy_ring_size;
+	phys_addr_t rdy_ring_rp_pa;
+};
+
+/**
  * struct  ipa_wdi_dl_params - WDI_TX configuration
  * @comp_ring_base_pa: physical address of the base of the Tx completion ring
  * @comp_ring_size: size of the Tx completion ring in bytes
@@ -877,17 +903,42 @@ struct ipa_wdi_dl_params {
 };
 
 /**
+ * struct  ipa_wdi_dl_params_smmu - WDI_TX configuration (with WLAN SMMU)
+ * @comp_ring: SG table describing the Tx completion ring
+ * @comp_ring_size: size of the Tx completion ring in bytes
+ * @ce_ring: SG table describing the Copy Engine Source Ring
+ * @ce_door_bell_pa: physical address of the doorbell that the IPA uC has to
+ * write into to trigger the copy engine
+ * @ce_ring_size: Copy Engine Ring size in bytes
+ * @num_tx_buffers: Number of pkt buffers allocated
+ */
+struct ipa_wdi_dl_params_smmu {
+	struct sg_table comp_ring;
+	u32 comp_ring_size;
+	struct sg_table ce_ring;
+	phys_addr_t ce_door_bell_pa;
+	u32 ce_ring_size;
+	u32 num_tx_buffers;
+};
+
+/**
  * struct  ipa_wdi_in_params - information provided by WDI client
  * @sys: IPA EP configuration info
  * @ul: WDI_RX configuration info
  * @dl: WDI_TX configuration info
+ * @ul_smmu: WDI_RX configuration info when WLAN uses SMMU
+ * @dl_smmu: WDI_TX configuration info when WLAN uses SMMU
+ * @smmu_enabled: true if WLAN uses SMMU
  */
 struct ipa_wdi_in_params {
 	struct ipa_sys_connect_params sys;
 	union {
 		struct ipa_wdi_ul_params ul;
 		struct ipa_wdi_dl_params dl;
+		struct ipa_wdi_ul_params_smmu ul_smmu;
+		struct ipa_wdi_dl_params_smmu dl_smmu;
 	} u;
+	bool smmu_enabled;
 };
 
 /**
@@ -898,6 +949,46 @@ struct ipa_wdi_in_params {
 struct ipa_wdi_out_params {
 	phys_addr_t uc_door_bell_pa;
 	u32 clnt_hdl;
+};
+
+/**
+ * struct ipa_wdi_db_params - information provided to retrieve
+ *       physical address of uC doorbell
+ * @client:	type of "client" (IPA_CLIENT_WLAN#_PROD/CONS)
+ * @uc_door_bell_pa: physical address of IPA uc doorbell
+ */
+struct ipa_wdi_db_params {
+	enum ipa_client_type client;
+	phys_addr_t uc_door_bell_pa;
+};
+
+/**
+ * struct  ipa_wdi_uc_ready_params - uC ready CB parameters
+ * @is_uC_ready: uC loaded or not
+ * @priv : callback cookie
+ * @notify:	callback
+ */
+typedef void (*ipa_uc_ready_cb)(void *priv);
+struct ipa_wdi_uc_ready_params {
+	bool is_uC_ready;
+	void *priv;
+	ipa_uc_ready_cb notify;
+};
+
+/**
+ * struct  ipa_wdi_buffer_info - address info of a WLAN allocated buffer
+ * @pa: physical address of the buffer
+ * @iova: IOVA of the buffer as embedded inside the WDI descriptors
+ * @size: size in bytes of the buffer
+ * @result: result of map or unmap operations (out param)
+ *
+ * IPA driver will create/release IOMMU mapping in IPA SMMU from iova->pa
+ */
+struct ipa_wdi_buffer_info {
+	phys_addr_t pa;
+	unsigned long iova;
+	size_t size;
+	int result;
 };
 
 /**
@@ -1011,6 +1102,11 @@ int ipa_disconnect(u32 clnt_hdl);
  * Resume / Suspend
  */
 int ipa_reset_endpoint(u32 clnt_hdl);
+
+/*
+ * Remove ep delay
+ */
+int ipa_clear_endpoint_delay(u32 clnt_hdl);
 
 /*
  * Configuration
@@ -1171,6 +1267,21 @@ int ipa_resume_wdi_pipe(u32 clnt_hdl);
 int ipa_suspend_wdi_pipe(u32 clnt_hdl);
 int ipa_get_wdi_stats(struct IpaHwStatsWDIInfoData_t *stats);
 u16 ipa_get_smem_restr_bytes(void);
+/*
+ * To retrieve doorbell physical address of
+ * wlan pipes
+ */
+int ipa_uc_wdi_get_dbpa(struct ipa_wdi_db_params *out);
+
+/*
+ * To register uC ready callback if uC not ready
+ * and also check uC readiness
+ * if uC not ready only, register callback
+ */
+int ipa_uc_reg_rdyCB(struct ipa_wdi_uc_ready_params *param);
+
+int ipa_create_wdi_mapping(u32 num_buffers, struct ipa_wdi_buffer_info *info);
+int ipa_release_wdi_mapping(u32 num_buffers, struct ipa_wdi_buffer_info *info);
 
 /*
  * Resource manager
@@ -1190,6 +1301,9 @@ int ipa_rm_set_perf_profile(enum ipa_rm_resource_name resource_name,
 
 int ipa_rm_add_dependency(enum ipa_rm_resource_name resource_name,
 			enum ipa_rm_resource_name depends_on_name);
+
+int ipa_rm_add_dependency_sync(enum ipa_rm_resource_name resource_name,
+		enum ipa_rm_resource_name depends_on_name);
 
 int ipa_rm_delete_dependency(enum ipa_rm_resource_name resource_name,
 			enum ipa_rm_resource_name depends_on_name);
@@ -1316,6 +1430,12 @@ enum ipa_client_type ipa_get_client_mapping(int pipe_idx);
 
 enum ipa_rm_resource_name ipa_get_rm_resource_from_ep(int pipe_idx);
 
+bool ipa_get_modem_cfg_emb_pipe_flt(void);
+struct device *ipa_get_dma_dev(void);
+struct iommu_domain *ipa_get_smmu_domain(void);
+
+int ipa_disable_apps_wan_cons_deaggr(uint32_t agg_size, uint32_t agg_count);
+
 #else /* CONFIG_IPA */
 
 /*
@@ -1336,6 +1456,14 @@ static inline int ipa_disconnect(u32 clnt_hdl)
  * Resume / Suspend
  */
 static inline int ipa_reset_endpoint(u32 clnt_hdl)
+{
+	return -EPERM;
+}
+
+/*
+ * Remove ep delay
+ */
+static inline int ipa_clear_endpoint_delay(u32 clnt_hdl)
 {
 	return -EPERM;
 }
@@ -1698,6 +1826,19 @@ static inline int ipa_suspend_wdi_pipe(u32 clnt_hdl)
 	return -EPERM;
 }
 
+static inline int ipa_uc_wdi_get_dbpa(
+	struct ipa_wdi_db_params *out)
+{
+	return -EPERM;
+}
+
+static inline int ipa_uc_reg_rdyCB(
+	struct ipa_wdi_uc_ready_params *param)
+{
+	return -EPERM;
+}
+
+
 /*
  * Resource manager
  */
@@ -1733,6 +1874,13 @@ static inline int ipa_rm_deregister(enum ipa_rm_resource_name resource_name,
 }
 
 static inline int ipa_rm_add_dependency(
+		enum ipa_rm_resource_name resource_name,
+		enum ipa_rm_resource_name depends_on_name)
+{
+	return -EPERM;
+}
+
+static inline int ipa_rm_add_dependency_sync(
 		enum ipa_rm_resource_name resource_name,
 		enum ipa_rm_resource_name depends_on_name)
 {
@@ -2017,6 +2165,37 @@ static inline enum ipa_rm_resource_name ipa_get_rm_resource_from_ep(
 	return -EFAULT;
 }
 
+static inline bool ipa_get_modem_cfg_emb_pipe_flt(void)
+{
+	return -EINVAL;
+}
+
+static inline struct device *ipa_get_dma_dev(void)
+{
+	return NULL;
+}
+
+static inline struct iommu_domain *ipa_get_smmu_domain(void)
+{
+	return NULL;
+}
+
+static inline int ipa_create_wdi_mapping(u32 num_buffers,
+		struct ipa_wdi_buffer_info *info)
+{
+	return -EINVAL;
+}
+
+static inline int ipa_release_wdi_mapping(u32 num_buffers,
+		struct ipa_wdi_buffer_info *info)
+{
+	return -EINVAL;
+}
+
+static inline int ipa_disable_apps_wan_cons_deaggr(void)
+{
+	return -EINVAL;
+}
 #endif /* CONFIG_IPA*/
 
 #endif /* _IPA_H_ */

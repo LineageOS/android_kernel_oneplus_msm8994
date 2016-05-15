@@ -64,20 +64,6 @@ static char *ipa_mhi_state_str[] = {
 		ipa_mhi_state_str[(state)] : \
 		"INVALID")
 
-static char *ipa_mhi_channel_state_str[] = {
-	__stringify(IPA_HW_MHI_CHANNEL_STATE_DISABLE),
-	__stringify(IPA_HW_MHI_CHANNEL_STATE_ENABLE),
-	__stringify(IPA_HW_MHI_CHANNEL_STATE_RUN),
-	__stringify(IPA_HW_MHI_CHANNEL_STATE_SUSPEND),
-	__stringify(IPA_HW_MHI_CHANNEL_STATE_STOP),
-	__stringify(IPA_HW_MHI_CHANNEL_STATE_ERROR),
-};
-
-#define MHI_CH_STATE_STR(state) \
-	(((state) >= 0 && (state) <= IPA_HW_MHI_CHANNEL_STATE_ERROR) ? \
-	ipa_mhi_channel_state_str[(state)] : \
-	"INVALID")
-
 /**
  * struct ipa_mhi_channel_ctx - MHI Channel context
  * @valid: entry is valid
@@ -162,6 +148,20 @@ static union IpaHwMhiDlUlSyncCmdData_t cached_dl_ul_sync_info;
 static char dbg_buff[IPA_MHI_MAX_MSG_LEN];
 static struct dentry *dent;
 
+static char *ipa_mhi_channel_state_str[] = {
+	__stringify(IPA_HW_MHI_CHANNEL_STATE_DISABLE),
+	__stringify(IPA_HW_MHI_CHANNEL_STATE_ENABLE),
+	__stringify(IPA_HW_MHI_CHANNEL_STATE_RUN),
+	__stringify(IPA_HW_MHI_CHANNEL_STATE_SUSPEND),
+	__stringify(IPA_HW_MHI_CHANNEL_STATE_STOP),
+	__stringify(IPA_HW_MHI_CHANNEL_STATE_ERROR),
+};
+
+#define MHI_CH_STATE_STR(state) \
+	(((state) >= 0 && (state) <= IPA_HW_MHI_CHANNEL_STATE_ERROR) ? \
+	ipa_mhi_channel_state_str[(state)] : \
+	"INVALID")
+
 static ssize_t ipa_mhi_debugfs_stats(struct file *file,
 	char __user *ubuf,
 	size_t count,
@@ -217,8 +217,7 @@ static ssize_t ipa_mhi_debugfs_stats(struct file *file,
 			IPA_MHI_MAX_MSG_LEN - nbytes, "\n");
 	}
 
-	simple_read_from_buffer(ubuf, count, ppos, dbg_buff, nbytes);
-	return 0;
+	return simple_read_from_buffer(ubuf, count, ppos, dbg_buff, nbytes);
 }
 
 static ssize_t ipa_mhi_debugfs_uc_stats(struct file *file,
@@ -228,8 +227,7 @@ static ssize_t ipa_mhi_debugfs_uc_stats(struct file *file,
 {
 	int nbytes = 0;
 	nbytes += ipa_uc_mhi_print_stats(dbg_buff, IPA_MHI_MAX_MSG_LEN);
-	simple_read_from_buffer(ubuf, count, ppos, dbg_buff, nbytes);
-	return 0;
+	return simple_read_from_buffer(ubuf, count, ppos, dbg_buff, nbytes);
 }
 
 const struct file_operations ipa_mhi_stats_ops = {
@@ -842,6 +840,12 @@ static int ipa_mhi_reset_ul_channel(struct ipa_mhi_channel_ctx *channel)
 				continue;
 			ep_idx = ipa_get_ep_mapping(
 				ipa_mhi_ctx->dl_channels[i].client);
+			if (-1 == ep_idx) {
+				IPA_MHI_ERR("Client %u is not mapped\n",
+					ipa_mhi_ctx->dl_channels[i].client);
+				BUG();
+				return -EFAULT;
+			}
 			memset(&ep_holb, 0, sizeof(ep_holb));
 			ep_holb.en = 1;
 			ep_holb.tmr_val = 0;
@@ -1095,9 +1099,9 @@ int ipa_mhi_start(struct ipa_mhi_start_params *params)
 		return -EINVAL;
 	}
 
-	if (!ipa_mhi_ctx) {
-		IPA_MHI_ERR("not initialized\n");
-		return -EPERM;
+	if (unlikely(!ipa_mhi_ctx)) {
+		IPA_MHI_ERR("IPA MHI was not initialized\n");
+		return -EINVAL;
 	}
 
 	if (ipa_uc_state_check()) {
@@ -1200,6 +1204,11 @@ int ipa_mhi_connect_pipe(struct ipa_mhi_connect_params *in, u32 *clnt_hdl)
 
 	if (in->sys.client >= IPA_CLIENT_MAX) {
 		IPA_MHI_ERR("bad parm client:%d\n", in->sys.client);
+		return -EINVAL;
+	}
+
+	if (unlikely(!ipa_mhi_ctx)) {
+		IPA_MHI_ERR("IPA MHI was not initialized\n");
 		return -EINVAL;
 	}
 
@@ -1345,7 +1354,7 @@ int ipa_mhi_disconnect_pipe(u32 clnt_hdl)
 
 	IPA_MHI_FUNC_ENTRY();
 
-	if (clnt_hdl >= IPA_NUM_PIPES) {
+	if (clnt_hdl >= ipa_ctx->ipa_num_pipes) {
 		IPAERR("invalid handle %d\n", clnt_hdl);
 		return -EINVAL;
 	}
@@ -1355,7 +1364,7 @@ int ipa_mhi_disconnect_pipe(u32 clnt_hdl)
 		return -EINVAL;
 	}
 
-	if (!ipa_mhi_ctx) {
+	if (unlikely(!ipa_mhi_ctx)) {
 		IPA_MHI_ERR("IPA MHI was not initialized\n");
 		return -EINVAL;
 	}
@@ -1590,6 +1599,11 @@ int ipa_mhi_suspend(bool force)
 
 	IPA_MHI_FUNC_ENTRY();
 
+	if (unlikely(!ipa_mhi_ctx)) {
+		IPA_MHI_ERR("IPA MHI was not initialized\n");
+		return -EINVAL;
+	}
+
 	res = ipa_mhi_set_state(IPA_MHI_STATE_SUSPEND_IN_PROGRESS);
 	if (res) {
 		IPA_MHI_ERR("ipa_mhi_set_state failed %d\n", res);
@@ -1728,6 +1742,11 @@ int ipa_mhi_resume(void)
 
 	IPA_MHI_FUNC_ENTRY();
 
+	if (unlikely(!ipa_mhi_ctx)) {
+		IPA_MHI_ERR("IPA MHI was not initialized\n");
+		return -EINVAL;
+	}
+
 	res = ipa_mhi_set_state(IPA_MHI_STATE_RESUME_IN_PROGRESS);
 	if (res) {
 		IPA_MHI_ERR("ipa_mhi_set_state failed %d\n", res);
@@ -1806,6 +1825,11 @@ EXPORT_SYMBOL(ipa_mhi_resume);
 int ipa_mhi_destroy(void)
 {
 	IPA_MHI_FUNC_ENTRY();
+
+	if (unlikely(!ipa_mhi_ctx)) {
+		IPA_MHI_ERR("IPA MHI was not initialized\n");
+		return -EINVAL;
+	}
 
 	IPAERR("Not implemented Yet!\n");
 	ipa_mhi_debugfs_destroy();

@@ -107,6 +107,10 @@ struct wan_ioctl_query_dl_filter_stats {
 		WAN_IOCTL_ADD_FLT_INDEX, \
 		struct ipa_fltr_installed_notif_req_msg_v01 *)
 
+#define WAN_IOC_VOTE_FOR_BW_MBPS _IOWR(WAN_IOC_MAGIC, \
+		WAN_IOCTL_VOTE_FOR_BW_MBPS, \
+		uint32_t *)
+
 #define WAN_IOC_POLL_TETHERING_STATS _IOWR(WAN_IOC_MAGIC, \
 		WAN_IOCTL_POLL_TETHERING_STATS, \
 		struct wan_ioctl_poll_tethering_stats *)
