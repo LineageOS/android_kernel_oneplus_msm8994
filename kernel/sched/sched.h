@@ -794,7 +794,6 @@ static inline u64 scale_load_to_cpu(u64 task_load, int cpu)
 
 	return task_load;
 }
-extern int power_delta_exceeded(unsigned int cpu_cost, unsigned int base_cost);
 
 static inline int capacity(struct rq *rq)
 {
