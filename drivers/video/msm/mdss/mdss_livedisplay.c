@@ -189,6 +189,10 @@ static int mdss_livedisplay_update_locked(struct mdss_dsi_ctrl_pdata *ctrl_pdata
 	if (!mlc->caps || !mdss_panel_is_power_on_interactive(pinfo->panel_power_state))
 		return 0;
 
+	// Restore saved RGB settings
+	if ((mlc->caps & MODE_RGB) && (types & MODE_RGB))
+		mdss_livedisplay_set_rgb_locked(mlc->mfd);
+
 	// First find the length of the command array
 	if ((mlc->caps & MODE_PRESET) && (types & MODE_PRESET))
 		len += mlc->presets_len[mlc->preset];
@@ -275,9 +279,6 @@ static int mdss_livedisplay_update_locked(struct mdss_dsi_ctrl_pdata *ctrl_pdata
 	}
 
 	kfree(cmd_buf);
-
-	// Restore saved RGB settings
-	mdss_livedisplay_set_rgb_locked(mlc->mfd);
 
 	return ret;
 }
@@ -616,6 +617,7 @@ int mdss_livedisplay_parse_dt(struct device_node *np, struct mdss_panel_info *pi
 	mlc->post_cmds = of_get_property(np,
 			"cm,mdss-livedisplay-post-cmd", &mlc->post_cmds_len);
 
+	mlc->caps |= MODE_RGB;
 	mlc->r = mlc->g = mlc->b = 32768;
 
 	pinfo->livedisplay = mlc;
