@@ -186,7 +186,14 @@ static int mdss_livedisplay_update_locked(struct mdss_dsi_ctrl_pdata *ctrl_pdata
 	if (mlc == NULL)
 		return -ENODEV;
 
-	if (!mlc->caps || !mdss_panel_is_power_on_interactive(pinfo->panel_power_state))
+	if (!mdss_panel_is_power_on_interactive(pinfo->panel_power_state))
+		return 0;
+
+	// Restore saved RGB settings
+	if (types == MODE_UPDATE_ALL)
+		mdss_livedisplay_set_rgb_locked(mlc->mfd);
+
+	if (!mlc->caps)
 		return 0;
 
 	// First find the length of the command array
@@ -275,9 +282,6 @@ static int mdss_livedisplay_update_locked(struct mdss_dsi_ctrl_pdata *ctrl_pdata
 	}
 
 	kfree(cmd_buf);
-
-	// Restore saved RGB settings
-	mdss_livedisplay_set_rgb_locked(mlc->mfd);
 
 	return ret;
 }
