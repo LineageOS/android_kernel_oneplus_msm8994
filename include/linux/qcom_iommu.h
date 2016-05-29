@@ -114,7 +114,6 @@ struct msm_iommu_drvdata {
 	void __iomem *glb_base;
 	void __iomem *cb_base;
 	void __iomem *smmu_local_base;
-	void __iomem *vbif_base;
 	int ncb;
 	int ttbr_split;
 	struct clk *clk;
