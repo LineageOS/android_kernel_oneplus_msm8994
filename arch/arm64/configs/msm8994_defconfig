@@ -606,6 +606,7 @@ CONFIG_JOYSTICK_XPAD=y
 CONFIG_QCOM_NPA_DUMP=y
 CONFIG_KERNEL_TEXT_MPU_PROT=y
 CONFIG_MSM_CORE_CTL_HELPER=y
+<<<<<<< HEAD
 
 
 #ifdef VENDOR_EDIT //changhua.li add for fingerprint
@@ -647,6 +648,4 @@ CONFIG_SET_PMI8994_RESET_TYPE=y
 #endif /*VENDOR_EDIT*/
 #end add by yangrujin end.
 
-#ifdef VENDOR_EDIT Bruce Chiu add for /proc/uid_cputime/show_uid_stat and /proc/uid_cputime/remove_uid_range
 CONFIG_UID_CPUTIME=y
-#endif /* VENDOR_EDIT */
