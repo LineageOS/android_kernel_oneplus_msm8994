@@ -164,6 +164,7 @@ enum dsi_pm_type {
 #define DSI_INTR_CMD_MDP_DONE		BIT(8)
 #define DSI_INTR_CMD_DMA_DONE_MASK	BIT(1)
 #define DSI_INTR_CMD_DMA_DONE		BIT(0)
+
 /* Update this if more interrupt masks are added in future chipsets */
 #define DSI_INTR_TOTAL_MASK		0x2222AA02
 
@@ -363,7 +364,13 @@ struct mdss_dsi_ctrl_pdata {
 	bool panel_bias_vreg;
 	bool dsi_irq_line;
 	atomic_t te_irq_ready;
-
+	#ifdef VENDOR_EDIT  //gzm@oem add 2015-03-26
+	int lcd_esd_te_check;
+	bool use_external_ic_power;
+	int lcd_lm3630_bl;
+	int lcd_tps65132_en;
+	int lcd_tps65132_en_n;
+	#endif
 	bool cmd_clk_ln_recovery_en;
 	bool cmd_sync_wait_broadcast;
 	bool cmd_sync_wait_trigger;
@@ -380,6 +387,9 @@ struct mdss_dsi_ctrl_pdata {
 	struct mdss_intf_recovery *recovery;
 
 	struct dsi_panel_cmds on_cmds;
+	#ifdef VENDOR_EDIT 
+	struct dsi_panel_cmds on_cmds_shoushi;
+	#endif
 	struct dsi_panel_cmds post_dms_on_cmds;
 	struct dsi_panel_cmds off_cmds;
 	struct dsi_panel_cmds status_cmds;

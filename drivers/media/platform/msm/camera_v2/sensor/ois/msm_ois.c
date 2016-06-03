@@ -54,6 +54,21 @@ static int32_t msm_ois_write_settings(struct msm_ois_ctrl_t *o_ctrl,
 					settings[i].reg_data,
 					settings[i].data_type);
 				break;
+          #ifdef VENDOR_EDIT
+          //added by zhangxiaowei@camera 20150310 for qcom OIS architecture
+			case MSM_CAMERA_I2C_NO_DATA:
+				o_ctrl->i2c_client.addr_type = MSM_CAMERA_I2C_BYTE_ADDR;
+				settings[i].reg_data = (settings[i].reg_addr & 0xFF);
+				settings[i].reg_addr = (settings[i].reg_addr >> 8);
+				settings[i].data_type = MSM_CAMERA_I2C_BYTE_DATA;
+				rc = o_ctrl->i2c_client.i2c_func_tbl->i2c_write(
+					&o_ctrl->i2c_client,
+					settings[i].reg_addr,
+					settings[i].reg_data,
+					settings[i].data_type);
+				o_ctrl->i2c_client.addr_type = MSM_CAMERA_I2C_WORD_ADDR;
+				break;
+           #endif /*VENDOR_EDIT*/
 			case MSM_CAMERA_I2C_DWORD_DATA:
 				reg_setting.reg_addr = settings[i].reg_addr;
 				reg_setting.reg_data[0] = (uint8_t)
@@ -290,6 +305,7 @@ static int32_t msm_ois_config(struct msm_ois_ctrl_t *o_ctrl,
 				sizeof(struct msm_camera_i2c_seq_reg_setting));
 		} else
 #endif
+
 		if (copy_from_user(&conf_array,
 			(void *)cdata->cfg.settings,
 			sizeof(struct msm_camera_i2c_seq_reg_setting))) {
@@ -297,7 +313,6 @@ static int32_t msm_ois_config(struct msm_ois_ctrl_t *o_ctrl,
 			rc = -EFAULT;
 			break;
 		}
-
 		if (!conf_array.size ||
 			conf_array.size > I2C_SEQ_REG_DATA_MAX) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);

@@ -561,8 +561,11 @@ static int c_show(struct seq_file *m, void *v)
 
 	if (!arch_read_hardware_id)
 		seq_printf(m, "Hardware\t: %s\n", machine_name);
-	else
+	else 
 		seq_printf(m, "Hardware\t: %s\n", arch_read_hardware_id());
+
+		seq_printf(m, "Processor\t: %s rev %d (%s)\n",
+		cpu_name, read_cpuid_id() & 15, ELF_PLATFORM);
 
 	return 0;
 }
