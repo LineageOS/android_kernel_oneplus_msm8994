@@ -2116,6 +2116,7 @@ static int	synaptics_input_init(struct synaptics_ts_data *ts)
 
 #ifdef SUPPORT_GESTURE
 	set_bit(KEY_F4 , ts->input_dev->keybit);//doulbe-tap resume
+	set_bit(BTN_TOOL_FINGER, ts->input_dev->keybit);
 	set_bit(KEY_WAKEUP , ts->input_dev->keybit);
 	for (i = 250; i <= 248 + Down2UpSwip; i++)
 		set_bit(i, ts->input_dev->keybit);
