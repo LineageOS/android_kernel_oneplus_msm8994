@@ -602,6 +602,7 @@
 
 //#endif
 		qcom,leds@d000 {
+			qcom,rgb-sync;
 			compatible = "qcom,leds-qpnp";
 			reg = <0xd000 0x100>;
 			label = "rgb";
