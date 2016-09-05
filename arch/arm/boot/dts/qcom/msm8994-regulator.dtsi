@@ -135,9 +135,16 @@
 	rpm-regulator-ldoa3 {
 		status = "okay";
 		pm8994_l3: regulator-l3 {
-			regulator-min-microvolt = <1200000>;
+		/*liuyan 2015/7/20,change 1.2 to 1.25*/
+		/*#ifndef VENDOR_EDIT*/
+			/*regulator-min-microvolt = <1200000>;
 			regulator-max-microvolt = <1200000>;
-			qcom,init-voltage = <1200000>;
+			qcom,init-voltage = <1200000>;*/
+		/*#else*/
+			regulator-min-microvolt = <1250000>;
+			regulator-max-microvolt = <1250000>;
+			qcom,init-voltage = <1250000>;
+		/*#endif*/
 			status = "okay";
 		};
 	};
@@ -254,6 +261,9 @@
 			regulator-min-microvolt = <2700000>;
 			regulator-max-microvolt = <2700000>;
 			qcom,init-voltage = <2700000>;
+//#ifdef VENDOR_EDIT //FIX GPS power issue
+			regulator-always-on;
+//#endif
 			status = "okay";
 		};
 	};
@@ -306,6 +316,9 @@
 			regulator-min-microvolt = <2950000>;
 			regulator-max-microvolt = <2950000>;
 			qcom,init-voltage = <2950000>;
+//#ifdef VENDOR_EDIT //changhua modify for cover
+			regulator-always-on;
+//#endif
 			status = "okay";
 		};
 	};
@@ -634,7 +647,7 @@
 		qcom,cpr-apc-volt-step = <5000>;
 
 		qcom,cpr-fuse-row = <137 0>;
-		qcom,cpr-fuse-target-quot = <31 39 47 55>;
+		qcom,cpr-fuse-target-quot = <39 39 47 55>;
 		qcom,cpr-fuse-target-quot-size = <8 8 8 8>;
 		qcom,cpr-fuse-target-quot-scale =
 					<0 10>,
@@ -655,7 +668,7 @@
 					<57 55 4 0>;
 		qcom,cpr-fuse-redun-sel = <140 61 3 1 0>;
 		qcom,cpr-fuse-redun-row = <1000 0>;
-		qcom,cpr-fuse-redun-target-quot = <0 8 16 24>;
+		qcom,cpr-fuse-redun-target-quot = <8 8 16 24>;
 		qcom,cpr-fuse-redun-ro-sel = <44 44 44 44>;
 		qcom,cpr-fuse-redun-init-voltage =
 					<1000 32 6 0>,

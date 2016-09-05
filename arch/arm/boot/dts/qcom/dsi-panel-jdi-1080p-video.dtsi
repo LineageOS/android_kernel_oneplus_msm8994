@@ -35,11 +35,37 @@
 		qcom,mdss-dsi-bpp = <24>;
 		qcom,mdss-dsi-underflow-color = <0xff>;
 		qcom,mdss-dsi-border-color = <0>;
-		qcom,mdss-dsi-on-command = [15 01 00 00 00 00 02 55 00
-			15 01 00 00 00 00 02 53 2C
-			15 01 00 00 00 00 02 35 00
-			05 01 00 00 78 00 02 29 00
-			05 01 00 00 78 00 02 11 00];
+		qcom,mdss-dsi-on-command = [    	   
+					23 01 00 00 00 00 02 FF 10
+					15 01 00 00 10 00 02 35 00
+					15 01 00 00 10 00 02 bb 03
+					//29 01 00 00 00 00 03 44 05 00		
+					23 01 00 00 00 00 02 FF E0
+					23 01 00 00 00 00 02 B5 86
+					23 01 00 00 00 00 02 B6 77
+					23 01 00 00 00 00 02 B8 AD
+					23 01 00 00 00 00 02 FB 01
+					23 01 00 00 00 00 02 FF 10
+
+/**************************************************************
+					//15 01 00 00 10 00 02 36 03  //add for lcd rotater 180
+					self test mode
+				    	05 01 00 00 32 00 02 28 00
+					05 01 00 00 32 00 02 10 00		  
+					23 01 00 00 00 00 02 FF 24
+					23 01 00 00 00 00 02 EC 01									  
+					23 01 00 00 00 00 02 FF 20
+					23 01 00 00 00 00 02 67 4D 
+*************************************************************/
+					15 01 00 00 10 00 02 36 03  //add for lcd rotater 180					
+					23 01 00 00 00 00 02 FF 23
+					23 01 00 00 00 00 02 08 03	
+					15 01 00 00 00 00 02 FF 10
+					15 01 00 00 00 00 02 51 FF
+					15 01 00 00 00 00 02 53 24
+       
+					05 01 00 00 78 00 02 11 00
+					05 01 00 00 78 00 02 29 00];
 		qcom,mdss-dsi-off-command = [05 01 00 00 02 00 02 28 00
 				 05 01 00 00 79 00 02 10 00];
 		qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
@@ -52,16 +78,20 @@
 		qcom,mdss-dsi-lane-1-state;
 		qcom,mdss-dsi-lane-2-state;
 		qcom,mdss-dsi-lane-3-state;
-		qcom,mdss-dsi-panel-timings = [e7 36 24 00 66 6a 2a 3a 2d 03 04 00];
-		qcom,mdss-dsi-t-clk-post = <0x04>;
-		qcom,mdss-dsi-t-clk-pre = <0x1b>;
+		qcom,mdss-dsi-panel-timings = [E7 43 37 00 60 6C 39 45 5b 03 04 00];
+		qcom,mdss-dsi-t-clk-post = <0x20>;		
+		qcom,mdss-dsi-t-clk-pre = <0x3e>;
+
 		qcom,mdss-dsi-bl-min-level = <1>;
-		qcom,mdss-dsi-bl-max-level = <4095>;
+		qcom,mdss-dsi-bl-max-level = <4095>;/*guozhiming@oem.cn modify 2015-03-24*/
+		qcom,mdss-dsi-lp11-init;
+		qcom,mdss-dsi-init-delay-us=<50000>;
 		qcom,mdss-dsi-dma-trigger = "trigger_sw";
 		qcom,mdss-dsi-mdp-trigger = "none";
 		qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_wled";
-		qcom,mdss-dsi-reset-sequence = <1 10>, <0 10>, <1 10>;
+		qcom,mdss-dsi-reset-sequence = <1 10>, <0 10>, <1 50>;
 		qcom,mdss-pan-physical-width-dimension = <61>;
 		qcom,mdss-pan-physical-height-dimension = <110>;
 	};
 };
+

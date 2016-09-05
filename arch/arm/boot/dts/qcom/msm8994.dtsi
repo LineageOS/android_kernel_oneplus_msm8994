@@ -29,13 +29,18 @@
 
 	aliases {
 		sdhc1 = &sdhc_1; /* SDC1 eMMC slot */
-		sdhc2 = &sdhc_2; /* SDC2 SD card slot */
+		/*do not enable sdhc2 and sdhc3
+		sdhc2 = &sdhc_2;
 		sdhc3 = &sdhc_3;
+		*/
 		i2c6 = &i2c_6; /* I2C6 NFC qup6 device */
 		i2c1 = &i2c_1;
 		i2c2 = &i2c_2;
 		i2c5 = &i2c_5;
 		spi0 = &spi_0;
+		/*#ifdef VENDOR_EDIT modify for fpc1021 fingerprints*/
+		spi12 = &spi_12;
+		/*#end VENDOR_EDIT*/
 		qup2 = &i2c_2;
 	};
 
@@ -299,14 +304,19 @@
 			reg = <0 0x06300000 0 0xD00000>;
 			label = "memory_hole";
 		};
-
+		/*#ifdef VENDOR_EDIT*/
+		nvbackup_regions: nvbackup_regions@0 {
+			linux,reserve-contiguous-region;
+			oem,reserve-region;
+			reg = <0 0x06200000 0 0x100000>;
+			label = "memory_nvbackup";
+		};
 		dfps_data_mem: dfps_data_mem@0 {
 			linux,reserve-contiguous-region;
 			linux,reserve-region;
 			reg = <0 0x03400000 0 0x1000>;
 			label = "dfps_data_mem";
 		};
-
 		cont_splash_mem: cont_splash_mem@0 {
 			linux,reserve-contiguous-region;
 			linux,reserve-region;
@@ -321,6 +331,22 @@
 			reg = <0 0x0ca00000 0 0x1f00000>;
 			label = "peripheral_mem";
 		};
+/*#ifdef VENDOR_EDIT  //changhua.li add for enlarge TZ APP memory to 25M*/
+		 tzapp_mem: tzapp_region@0 {
+
+            linux,reserve-contiguous-region;
+
+            linux,reserve-region;
+
+            linux,remove-completely;
+
+            reg = <0 0x0E900000 0 0x1900000>;
+
+            label = "tzapp_mem";
+
+        };
+/*#endif  VENDOR_EDIT*/
+
 
 		modem_mem: modem_region@0 {
 			linux,reserve-contiguous-region;
@@ -328,6 +354,30 @@
 			linux,remove-completely;
 			reg = <0 0x07000000 0 0x5a00000>;
 			label = "modem_mem";
+		};
+
+/* #ifdef VENDOR_EDIT // add by xcb for ramoops 2015-03-31 */
+		ramoops_mem: ramoops_region@0 {
+			linux,reserve-contiguous-region;
+			oem,reserve-region;//modify by jiachenghui for ramoops reserve region
+			//linux,remove-completely;//del by jiachenghui for ramoops reserve region
+			reg = <0 0xac000000 0 0x00100000>;//modify from 0x05800000 to 0xac000000 by jiachenghui for ramoops reserve region
+			label = "ramoops_mem";
+		};
+/* #endif VENDOR_EDIT */
+
+		param_mem: param_region@0 {
+			linux,reserve-contiguous-region;
+			oem,reserve-region;
+			//linux,remove-completely;
+			reg = <0 0xac200000 0 0x00100000>;
+			label = "param_mem";
+		};
+		mtp_regions: mtp_regions@0 {
+			linux,reserve-contiguous-region;
+			oem,reserve-region;
+			reg = <0 0xAC400000 0 0x00100000>;
+			label = "memory_mtp";
 		};
 	};
 };
@@ -923,7 +973,9 @@
 		reg = <0xf9017000 0x1000>;
 		reg-names = "wdt-base";
 		interrupts = <0 3 0>, <0 4 0>;
-		qcom,bark-time = <11000>;
+//liyunbing@BSP, 2015/05/21, WDT bark-time too short cause some task timeout  
+                #qcom,bark-time = <11000>;
+                qcom,bark-time = <15000>;
 		qcom,pet-time = <10000>;
 		qcom,ipi-ping;
 	};
@@ -1091,6 +1143,14 @@
 		reg-names = "rfsa_sensor";
 		qcom,client-id = <0x011013ee>;
 		linux,contiguous-region = <&adsp_mem>;
+	};
+
+	qcom,nvbackup_sharedmem@00000000 {
+		compatible = "qcom,sharedmem-uio";
+		reg = <0x06200000 0x001000000>;
+		reg-names = "nvbackup";
+		qcom,client-id = <0x00000001>;
+		linux,contiguous-region = <&nvbackup_regions>;
 	};
 
 	sdhc_1: sdhci@f9824900 {
@@ -1329,6 +1389,64 @@
 		clocks = <&clock_gcc clk_gcc_blsp1_ahb_clk>,
 			 <&clock_gcc clk_gcc_blsp1_qup1_spi_apps_clk>;
 	};
+//#ifdef VENDOR_EDIT
+/* add for fpc1021 fingerprints */
+	spi_12: spi@f9968000 {  
+		compatible = "qcom,spi-qup-v2";
+		//cell-index = <12>; //changhua
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg-names = "spi_physical"/*, "spi_bam_physical"*/;
+		
+		/*Add BAM physical address
+		BLSP1: 0xf9904000
+		BLSP2: 0xf9944000
+		*/
+		
+		reg = <0xf9968000 0x1000>/*,
+			 <0xf9944000 0x19000>*/;
+			  
+		interrupt-names = "spi12_irq"/*, "spi_bam_irq"*/;
+		
+		/* Add BAM IRQ
+		BLSP1: 238
+		BLSP2: 239   ??271??? 239 is offset
+		*/
+		interrupts = <0 106 0>/*, <0 239 0>*/;
+
+		spi-max-frequency = <4800000>;
+		
+		/* //changhua
+		qcom,gpio-mosi = <&msm_gpio 85 0>;
+		qcom,gpio-miso = <&msm_gpio 86 0>;
+		qcom,gpio-clk  = <&msm_gpio 88 0>;
+		qcom,gpio-cs0  = <&msm_gpio 87 0>;
+		*/
+		
+		clock-names = "iface_clk", "core_clk";
+		clocks = <&clock_gcc clk_gcc_blsp2_ahb_clk>,
+			<&clock_gcc clk_gcc_blsp2_qup6_spi_apps_clk>;
+		
+		qcom,master-id = <86>;
+		/*qcom,infinite-mode = <0>;
+		qcom,use-bam;
+		qcom,ver-reg-exists;
+		qcom,bam-consumer-pipe-index = <22>;
+		qcom,bam-producer-pipe-index = <23>;
+		*/
+		/*lichanghua add for use pinctrl*/
+		/* Assign runtime functions to pins */
+		
+		qcom,use-pinctrl;
+		pinctrl-names = "spi_default", "spi_sleep";
+		pinctrl-0 = <&spi_12_active &spi_12_cs0_active>;
+		pinctrl-1 = <&spi_12_sleep &spi_12_cs0_sleep>;
+		
+		qcom,shared;
+		
+		/*lichanghua add for use pinctrl end*/
+	};
+//#endif/*VENDOR_EDIT*/
 
 	qcom,msm-ssc-sensors {
 		compatible = "qcom,msm-ssc-sensors";
@@ -1459,7 +1577,11 @@
 
 			qcom,cdc-micbias-ldoh-v = <0x3>;
 			qcom,cdc-micbias-cfilt1-mv = <1800>;
+			//#ifdef VENDOR_EDIT	
+			/*wangdongdong@MultiMedia.AudioDrv , 2015/3/24, modify micbias voltage*/
+			/*kangjirui@MultiMedia.AudioDrv , 2015/4/18, modify micbias voltage for headset button error*/
 			qcom,cdc-micbias-cfilt2-mv = <2700>;
+			//#endif /* VENDOR_EDIT */
 			qcom,cdc-micbias-cfilt3-mv = <1800>;
 			qcom,cdc-micbias1-cfilt-sel = <0x0>;
 			qcom,cdc-micbias2-cfilt-sel = <0x1>;
@@ -1554,7 +1676,11 @@
 		reg = <0xf92f8800 0x3ff>,
 			<0xf9b3a000 0x110>;
 		reg-names = "core", "phy_csr";
-		qcom,hsphy-init = <0x00D191A4>;
+		// #ifdef VENDOR_EDIT
+		/*modify by jiachenghui from 0x00D191A4 to 0x00D191A7 for OTG 2015-04-22*/
+		/*change HS DC voltage-level to 0x0011 by jiachenghui for OTG detect issue 2015-05-23*/
+		qcom,hsphy-init = <0x00D187A7>;
+                //#endif /*VENDOR_EDIT*/
 		vdd-supply = <&pm8994_s2_corner>;
 		vddcx-supply = <&pm8994_s1_corner>;
 		vdda18-supply = <&pm8994_l6>;
@@ -1751,6 +1877,11 @@
 		compatible = "qcom,android-usb";
 		reg = <0xfe87f0c8 0xc8>;
 		qcom,pm-qos-latency = <61 637 1261>;
+                /*add by jiachenghui for cdrom,20150528*/
+                /*#ifdef VENDOR_EDIT*/
+                qcom,android-usb-cdrom;
+                /*#ifdef VENDOR_EDIT*/
+                /*end add by jiachenghui for cdrom,20150528*/
 	};
 
 	qcom,venus@fdce0000 {
@@ -1865,6 +1996,15 @@
 
 		linux,contiguous-region = <&peripheral_mem>;
 	};
+
+/* #ifdef VENDOR_EDIT // add by xcb for ramoops 2015-03-31 */
+	ramoops {
+		compatible = "ramoops";
+		/*reg = <0x05800000 0x00100000>;*/
+		linux,contiguous-region = <&ramoops_mem>;
+	};
+/* #endif VENDOR_EDIT */
+
 
 	clock_rpm: qcom,rpmcc@fc401880 {
 		compatible = "qcom,rpmcc-8994";
@@ -2485,6 +2625,13 @@
 		pinctrl-1 = <&i2c_2_sleep>;
 		qcom,noise-rjct-scl = <0>;
 		qcom,noise-rjct-sda = <0>;
+		
+		/* #ifdef VENDOR_EDIT */
+		//add by yangrujin@bsp for dma has some issue causing i2c fail
+		//qcom,disable-dma;
+		/* #endif  //VENDOR_EDIT */
+		
+		
 		dmas = <&dma_blsp1 14 64 0x20000020 0x20>,
 			<&dma_blsp1 15 32 0x20000020 0x20>;
 		dma-names = "tx", "rx";
@@ -2510,6 +2657,10 @@
 		pinctrl-1 = <&i2c_5_sleep>;
 		qcom,noise-rjct-scl = <0>;
 		qcom,noise-rjct-sda = <0>;
+		//#ifndef VENDOR_EDIT	
+		/*zhiguang.su@MultiMedia.AudioDrv , 2015/4/13, dma mode will cause I2C fail*/			
+	  qcom,disable-dma;
+	  //#endif
 		dmas = <&dma_blsp2 20 64 0x20000020 0x20>,
 			<&dma_blsp2 21 32 0x20000020 0x20>;
 		dma-names = "tx", "rx";
@@ -2558,27 +2709,30 @@
 			"AIF4 VI", "MCLK",
 			"RX_BIAS", "MCLK",
 			"LDO_H", "MCLK",
-			"MADINPUT", "MCLK",
-			"AMIC1", "MIC BIAS1 Internal1",
-			"MIC BIAS1 Internal1", "Handset Mic",
-			"AMIC2", "MIC BIAS2 External",
-			"MIC BIAS2 External", "Headset Mic",
-			"AMIC3", "MIC BIAS2 External",
-			"MIC BIAS2 External", "ANCRight Headset Mic",
-			"AMIC4", "MIC BIAS2 External",
-			"MIC BIAS2 External", "ANCLeft Headset Mic",
-			"DMIC1", "MIC BIAS1 External",
-			"MIC BIAS1 External", "Digital Mic1",
-			"DMIC2", "MIC BIAS1 External",
-			"MIC BIAS1 External", "Digital Mic2",
-			"DMIC3", "MIC BIAS3 External",
-			"MIC BIAS3 External", "Digital Mic3",
-			"DMIC4", "MIC BIAS3 External",
-			"MIC BIAS3 External", "Digital Mic4",
-			"DMIC5", "MIC BIAS4 External",
-			"MIC BIAS4 External", "Digital Mic5",
-			"DMIC6", "MIC BIAS4 External",
-			"MIC BIAS4 External", "Digital Mic6";
+			"MADINPUT", "MCLK";
+			 //#ifndef VENDOR_EDIT	
+			  /*zhiguang.su@MultiMedia.AudioDrv , 2015/3/19, delete unsed mic*/			
+			//"AMIC1", "MIC BIAS1 Internal1",
+			//"MIC BIAS1 Internal1", "Handset Mic",
+			//"AMIC2", "MIC BIAS2 External",
+			//"MIC BIAS2 External", "Headset Mic",
+			//"AMIC3", "MIC BIAS2 External",
+			//"MIC BIAS2 External", "ANCRight Headset Mic",
+			//"AMIC4", "MIC BIAS2 External",
+			//"MIC BIAS2 External", "ANCLeft Headset Mic",
+			//"DMIC1", "MIC BIAS1 External",
+			//"MIC BIAS1 External", "Digital Mic1",
+			//"DMIC2", "MIC BIAS1 External",
+			//"MIC BIAS1 External", "Digital Mic2",
+			//"DMIC3", "MIC BIAS3 External",
+			//"MIC BIAS3 External", "Digital Mic3",
+			//"DMIC4", "MIC BIAS3 External",
+			//"MIC BIAS3 External", "Digital Mic4",
+			//"DMIC5", "MIC BIAS4 External",
+			//"MIC BIAS4 External", "Digital Mic5",
+			//"DMIC6", "MIC BIAS4 External",
+			//"MIC BIAS4 External", "Digital Mic6";
+			//#endif
 
 		clock-names = "osr_clk";
 		clocks = <&clock_rpm clk_div_clk1>;
@@ -2587,15 +2741,35 @@
 		pinctrl-names = "sleep",
 				"auxpcm-active",
 				"mi2s-active",
-				"active";
-		pinctrl-0 = <&pri_mi2s_sleep>, <&pri_mi2s_sd0_sleep>,
-				<&sec_aux_pcm_sleep>, <&sec_aux_pcm_din_sleep>;
-		pinctrl-1 = <&pri_mi2s_sleep>, <&pri_mi2s_sd0_sleep>,
-				<&sec_aux_pcm_active>, <&sec_aux_pcm_din_active>;
-		pinctrl-2 = <&pri_mi2s_active>, <&pri_mi2s_sd0_active>,
-				<&sec_aux_pcm_sleep>, <&sec_aux_pcm_din_sleep>;
-		pinctrl-3 = <&pri_mi2s_active>, <&pri_mi2s_sd0_active>,
-				<&sec_aux_pcm_active>, <&sec_aux_pcm_din_active>;
+				//#ifdef VENDOR_EDIT  
+				/*zhiguang.su@MultiMedia.AudioDrv,changed for quat i2s */
+				"active",
+				"quat_mi2s_sleep",
+				"quat_mi2s_active";
+				//#endif
+//#ifdef VENDOR_EDIT 				
+//pinctrl-0 = <&pri_mi2s_sleep>, <&pri_mi2s_sd0_sleep>,
+//		<&sec_aux_pcm_sleep>, <&sec_aux_pcm_din_sleep>;
+//pinctrl-1 = <&pri_mi2s_sleep>, <&pri_mi2s_sd0_sleep>,
+//		<&sec_aux_pcm_active>, <&sec_aux_pcm_din_active>;
+//pinctrl-2 = <&pri_mi2s_active>, <&pri_mi2s_sd0_active>,
+//		<&sec_aux_pcm_sleep>, <&sec_aux_pcm_din_sleep>;
+//pinctrl-3 = <&pri_mi2s_active>, <&pri_mi2s_sd0_active>,
+//		<&sec_aux_pcm_active>, <&sec_aux_pcm_din_active>;
+//#endif
+
+//#ifdef VENDOR_EDIT  				
+/*zhiguang.su@MultiMedia.AudioDrv,2015-4-8,remove unused pri-i2s for conflict pins with BSP module.*/
+		pinctrl-0 = <&sec_aux_pcm_sleep>, <&sec_aux_pcm_din_sleep>;
+		pinctrl-1 = <&sec_aux_pcm_active>, <&sec_aux_pcm_din_active>;
+		pinctrl-2 = <&sec_aux_pcm_sleep>, <&sec_aux_pcm_din_sleep>;
+		pinctrl-3 = <&sec_aux_pcm_active>, <&sec_aux_pcm_din_active>;
+//#endif				
+//#ifdef VENDOR_EDIT  
+/*zhiguang.su@MultiMedia.AudioDrv changed for quat i2s */
+		pinctrl-4 = <&quat_mi2s_sleep>, <&quat_mi2s_mclk_sleep>, <&quat_mi2s_sd0_sleep> , <&quat_mi2s_sd1_sleep>;
+		pinctrl-5 = <&quat_mi2s_active>, <&quat_mi2s_mclk_active>, <&quat_mi2s_sd0_active> , <&quat_mi2s_sd1_active>;			
+//#endif
 		asoc-platform = <&pcm0>, <&pcm1>, <&pcm2>, <&voip>, <&voice>,
 				<&loopback>, <&compress>, <&hostless>,
 				<&afe>, <&lsm>, <&routing>, <&cpe>, <&compr>;
@@ -2604,7 +2778,9 @@
 				"msm-compress-dsp", "msm-pcm-hostless", "msm-pcm-afe",
 				"msm-lsm-client", "msm-pcm-routing", "msm-cpe-lsm",
 				"msm-compr-dsp";
-		asoc-cpu = <&dai_pri_auxpcm>, <&dai_sec_auxpcm>, <&dai_hdmi>, <&dai_mi2s>,
+//#ifdef VENDOR_EDIT  	
+/*zhiguang.su@MultiMedia.AudioDrv  changed for quat i2s*/			
+		asoc-cpu = <&dai_pri_auxpcm>, <&dai_sec_auxpcm>, <&dai_hdmi>, <&dai_mi2s>,<&qua_mi2s>,
 				<&sb_0_rx>, <&sb_0_tx>, <&sb_1_rx>, <&sb_1_tx>,
 				<&sb_2_rx>, <&sb_2_tx>, <&sb_3_rx>, <&sb_3_tx>,
 				<&sb_4_rx>, <&sb_4_tx>, <&sb_5_tx>, <&bt_sco_rx>,
@@ -2613,7 +2789,7 @@
 				<&incall_record_rx>, <&incall_record_tx>, <&incall_music_rx>,
 				<&incall_music2_rx>;
 		asoc-cpu-names = "msm-dai-q6-auxpcm.1", "msm-dai-q6-auxpcm.2",
-				"msm-dai-q6-hdmi.8", "msm-dai-q6-mi2s.0",
+				"msm-dai-q6-hdmi.8", "msm-dai-q6-mi2s.0","msm-dai-q6-mi2s.3",
 				"msm-dai-q6-dev.16384", "msm-dai-q6-dev.16385",
 				"msm-dai-q6-dev.16386", "msm-dai-q6-dev.16387",
 				"msm-dai-q6-dev.16388", "msm-dai-q6-dev.16389",
@@ -2626,6 +2802,7 @@
 				"msm-dai-q6-dev.240", "msm-dai-q6-dev.32771",
 				"msm-dai-q6-dev.32772", "msm-dai-q6-dev.32773",
 				"msm-dai-q6-dev.32770";
+//#endif				
 		asoc-codec = <&stub_codec>;
 		asoc-codec-names = "msm-stub-codec.1";
 	};
@@ -2865,9 +3042,20 @@
 		dai_mi2s: qcom,msm-dai-q6-mi2s-prim {
 			compatible = "qcom,msm-dai-q6-mi2s";
 			qcom,msm-dai-q6-mi2s-dev-id = <0>;
-			qcom,msm-mi2s-rx-lines = <2>;
-			qcom,msm-mi2s-tx-lines = <1>;
+//#ifdef VENDOR_EDIT  
+/*zhiguang.su@MultiMedia.AudioDrv ,changed for quat i2s*/		
+
+		 qcom,msm-mi2s-rx-lines = <1>;
+			qcom,msm-mi2s-tx-lines = <2>;
 		};
+	
+    qua_mi2s: qcom,msm-dai-q6-mi2s-quat {
+			compatible = "qcom,msm-dai-q6-mi2s";
+			qcom,msm-dai-q6-mi2s-dev-id = <3>;
+			qcom,msm-mi2s-rx-lines = <1>;
+			qcom,msm-mi2s-tx-lines = <2>;
+		};  
+//#endif		 
 	};
 
 	hostless: qcom,msm-pcm-hostless {
@@ -3025,9 +3213,9 @@
 		qcom,ce-opp-freq = <171430000>;
 	};
 
-	qcom,qseecom@6500000 {
+	qcom,qseecom@6500000{
 		compatible = "qcom,qseecom";
-		reg = <0x6500000 0x500000>;
+		reg = <0x0E900000 0x1900000>;//reg = <0x6500000 0x500000>;  ---->   <0x0E700000 0x700000>; ----> <0x0E900000 0x1900000>; /*VENDOR_EDIT changhua add more memory for fpc1150 and alipay in TZ*/
 		reg-names = "secapp-region";
 		qcom,disk-encrypt-pipe-pair = <2>;
 		qcom,file-encrypt-pipe-pair = <0>;
@@ -3257,7 +3445,7 @@
 			qcom,mitigation-freq-khz = <768000>;
 			qcom,vph-high-threshold-uv = <3500000>;
 			qcom,vph-low-threshold-uv = <3300000>;
-			qcom,soc-low-threshold = <10>;
+			qcom,soc-low-threshold = <20>;
 			qcom,thermal-handle = <&msm_thermal_freq>;
 		};
 	};
