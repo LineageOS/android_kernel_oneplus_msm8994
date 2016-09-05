@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -25,10 +25,11 @@
  * to the Linux Foundation.
  */
 
-#include <sme_Api.h>
-#if !defined( HDD_CONNECTION_H__ )
-#define HDD_CONNECTION_H__
+#if !defined(WLAN_HDD_ASSOC_H__)
+#define WLAN_HDD_ASSOC_H__
 #include <wlan_hdd_mib.h>
+#include <sme_Api.h>
+
 #define HDD_MAX_NUM_IBSS_STA          ( 32 )
 #ifdef FEATURE_WLAN_TDLS
 #define HDD_MAX_NUM_TDLS_STA          ( 8 )
@@ -45,28 +46,36 @@
    In Rome case, IBSS uses the 2nd peer as bss peer */
 #define IBSS_BROADCAST_STAID 1
 
-typedef enum
-{
-   /** Not associated in Infra or participating in an IBSS / Ad-hoc network.*/
+/* Timeout in ms for peer info request completion */
+#define IBSS_PEER_INFO_REQ_TIMOEUT 1000
+
+#define INVALID_PEER_IDX -1
+
+/**
+ * enum eConnectionState - connection state values at HDD
+ * @eConnectionState_NotConnected: Not associated in Infra or participating in
+ *   an IBSS / Ad-hoc network
+ * @eConnectionState_Connecting: While connection in progress
+ * @eConnectionState_Associated: Associated in an Infrastructure network
+ * @eConnectionState_IbssDisconnected: Participating in an IBSS network though
+ *   disconnected (no partner STA in IBSS)
+ * @eConnectionState_IbssConnected: Participating in an IBSS network with
+ *   partner stations also present
+ * @eConnectionState_Disconnecting: Disconnecting in an Infrastructure network.
+ * @eConnectionState_NdiDisconnected: NDI in disconnected state - no peers
+ * @eConnectionState_NdiConnected: NDI in connected state - at least one peer
+ */
+typedef enum {
    eConnectionState_NotConnected,
-
-   /** While connection in progress */
    eConnectionState_Connecting,
-
-   /** Associated in an Infrastructure network.*/
    eConnectionState_Associated,
-
-   /** Participating in an IBSS network though disconnected (no partner stations
-       in the IBSS).*/
    eConnectionState_IbssDisconnected,
-
-   /** Participating in an IBSS network with partner stations also present*/
    eConnectionState_IbssConnected,
-
-   /** Disconnecting in an Infrastructure network.*/
-   eConnectionState_Disconnecting
-
+   eConnectionState_Disconnecting,
+   eConnectionState_NdiDisconnected,
+   eConnectionState_NdiConnected,
 }eConnectionState;
+
 /**This structure stores the connection information */
 typedef struct connection_info_s
 {
@@ -111,7 +120,17 @@ typedef struct connection_info_s
 
    v_U8_t proxyARPService;
 
+   /** NSS and RateFlags used for this connection */
+   uint8_t   nss;
+   uint32_t  rate_flags;
+
+   /* ptk installed state */
+   bool ptk_installed;
+
+   /* gtk installed state */
+   bool gtk_installed;
 }connection_info_t;
+
 /*Forward declaration of Adapter*/
 typedef struct hdd_adapter_s hdd_adapter_t;
 typedef struct hdd_context_s hdd_context_t;
@@ -131,23 +150,18 @@ eCsrBand hdd_connGetConnectedBand( hdd_station_ctx_t *pHddStaCtx );
 extern eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, v_U32_t roamId,
                                 eRoamCmdStatus roamStatus, eCsrRoamResult roamResult );
 
-extern v_VOID_t hdd_connSaveConnectInfo( hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo, eCsrRoamBssType eBssType );
-
 v_BOOL_t hdd_connGetConnectedBssType( hdd_station_ctx_t *pHddCtx,
         eMib_dot11DesiredBssType *pConnectedBssType );
 
 int hdd_SetGENIEToCsr( hdd_adapter_t *pAdapter, eCsrAuthType *RSNAuthType );
 
 int hdd_set_csr_auth_type( hdd_adapter_t *pAdapter, eCsrAuthType RSNAuthType );
-VOS_STATUS hdd_roamRegisterTDLSSTA( hdd_adapter_t *pAdapter,
-                                    tANI_U8 *peerMac, tANI_U16 staId, tANI_U8 ucastSig);
+VOS_STATUS hdd_roamRegisterTDLSSTA(hdd_adapter_t *pAdapter,
+                                   const tANI_U8 *peerMac, tANI_U16 staId,
+                                   tANI_U8 ucastSig, uint8_t qos);
 void hdd_PerformRoamSetKeyComplete(hdd_adapter_t *pAdapter);
 
-void hdd_SendPeerStatusIndToOemApp(v_MACADDR_t *peerMac,
-                                   tANI_U8 peerStatus,
-                                   tANI_U8 peerTimingMeasCap,
-                                   tANI_U8 sessionId,
-                                   tSirSmeChanInfo *chan_info);
+VOS_STATUS hdd_roamDeregisterTDLSSTA(hdd_adapter_t *adapter, uint8_t staId);
 
 #if defined(FEATURE_WLAN_ESE) && defined(FEATURE_WLAN_ESE_UPLOAD)
 void hdd_indicateEseBcnReportNoResults(const hdd_adapter_t *pAdapter,
@@ -155,5 +169,16 @@ void hdd_indicateEseBcnReportNoResults(const hdd_adapter_t *pAdapter,
                                        const tANI_BOOLEAN flag,
                                        const tANI_U8 numBss);
 #endif /* FEATURE_WLAN_ESE && FEATURE_WLAN_ESE_UPLOAD */
+
+VOS_STATUS hdd_roamRegisterSTA(hdd_adapter_t *adapter, tCsrRoamInfo *roam_info,
+			       uint8_t sta_id, v_MACADDR_t *peer_mac_addr,
+			       tSirBssDescription *bss_desc);
+
+bool hdd_save_peer(hdd_station_ctx_t *sta_ctx, uint8_t sta_id,
+		   v_MACADDR_t *peer_mac_addr);
+void hdd_delete_peer(hdd_station_ctx_t *sta_ctx, uint8_t sta_id);
+
+int hdd_get_peer_idx(hdd_station_ctx_t *sta_ctx, v_MACADDR_t *addr);
+VOS_STATUS hdd_roamDeregisterSTA(hdd_adapter_t *adapter, uint8_t sta_id);
 
 #endif

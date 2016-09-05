@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -32,8 +32,153 @@
 #include <linux/module.h>
 #include <adf_os_types.h>
 #include <adf_nbuf.h>
+#include <adf_os_io.h>
+#include <adf_os_lock.h>
+#include <net/ieee80211_radiotap.h>
+#include "adf_trace.h"
+#include "vos_trace.h"
+
+#ifdef CONFIG_WCNSS_MEM_PRE_ALLOC
+#include <net/cnss_prealloc.h>
+#endif
+
+/* Packet Counter */
+static uint32_t nbuf_tx_mgmt[NBUF_TX_PKT_STATE_MAX];
+static uint32_t nbuf_tx_data[NBUF_TX_PKT_STATE_MAX];
+
+/**
+ * adf_nbuf_tx_desc_count_display() - Displays the packet counter
+ *
+ * Return: none
+ */
+void adf_nbuf_tx_desc_count_display(void)
+{
+	adf_os_print("Current Snapshot of the Driver:\n");
+	adf_os_print("Data Packets:\n");
+	adf_os_print("HDD %d TXRX_Q %d TXRX %d HTT %d",
+		     nbuf_tx_data[NBUF_TX_PKT_HDD] -
+		     (nbuf_tx_data[NBUF_TX_PKT_TXRX] +
+		     nbuf_tx_data[NBUF_TX_PKT_TXRX_ENQUEUE] -
+		     nbuf_tx_data[NBUF_TX_PKT_TXRX_DEQUEUE]),
+		     nbuf_tx_data[NBUF_TX_PKT_TXRX_ENQUEUE] -
+		     nbuf_tx_data[NBUF_TX_PKT_TXRX_DEQUEUE],
+		     (nbuf_tx_data[NBUF_TX_PKT_TXRX] -
+		     nbuf_tx_data[NBUF_TX_PKT_HTT]),
+		     (nbuf_tx_data[NBUF_TX_PKT_HTT]  -
+		     nbuf_tx_data[NBUF_TX_PKT_HTC]));
+	adf_os_print(" HTC %d  HIF %d CE %d TX_COMP %d\n",
+		     (nbuf_tx_data[NBUF_TX_PKT_HTC]  -
+		     nbuf_tx_data[NBUF_TX_PKT_HIF]),
+		     (nbuf_tx_data[NBUF_TX_PKT_HIF]  -
+		     nbuf_tx_data[NBUF_TX_PKT_CE]),
+		     (nbuf_tx_data[NBUF_TX_PKT_CE]   -
+		     nbuf_tx_data[NBUF_TX_PKT_FREE]),
+		     nbuf_tx_data[NBUF_TX_PKT_FREE]);
+	adf_os_print("Mgmt Packets:\n");
+	adf_os_print("TXRX %d HTT %d HTC %d HIF %d CE %d TX_COMP %d\n",
+		     (nbuf_tx_mgmt[NBUF_TX_PKT_TXRX] -
+		     nbuf_tx_mgmt[NBUF_TX_PKT_HTT]),
+		     (nbuf_tx_mgmt[NBUF_TX_PKT_HTT]  -
+		     nbuf_tx_mgmt[NBUF_TX_PKT_HTC]),
+		     (nbuf_tx_mgmt[NBUF_TX_PKT_HTC]  -
+		     nbuf_tx_mgmt[NBUF_TX_PKT_HIF]),
+		     (nbuf_tx_mgmt[NBUF_TX_PKT_HIF]  -
+		     nbuf_tx_mgmt[NBUF_TX_PKT_CE]),
+		     (nbuf_tx_mgmt[NBUF_TX_PKT_CE]   -
+		     nbuf_tx_mgmt[NBUF_TX_PKT_FREE]),
+		     nbuf_tx_mgmt[NBUF_TX_PKT_FREE]);
+}
+
+/**
+ * adf_nbuf_tx_desc_count_update() - Updates the layer packet counter
+ * @packet_type   : packet type either mgmt/data
+ * @current_state : layer at which the packet currently present
+ *
+ * Return: none
+ */
+static inline void adf_nbuf_tx_desc_count_update(uint8_t packet_type,
+							uint8_t current_state)
+{
+	switch (packet_type) {
+	case NBUF_TX_PKT_MGMT_TRACK:
+		nbuf_tx_mgmt[current_state]++;
+		break;
+	case NBUF_TX_PKT_DATA_TRACK:
+		nbuf_tx_data[current_state]++;
+		break;
+	default:
+		break;
+	}
+}
+
+/**
+ * adf_nbuf_tx_desc_count_clear() - Clears packet counter for both data, mgmt
+ *
+ * Return: none
+ */
+void adf_nbuf_tx_desc_count_clear(void)
+{
+	memset(nbuf_tx_mgmt, 0, sizeof(nbuf_tx_mgmt));
+	memset(nbuf_tx_data, 0, sizeof(nbuf_tx_data));
+}
+
+/**
+ * adf_nbuf_set_state() - Updates the packet state
+ * @nbuf:            network buffer
+ * @current_state :  layer at which the packet currently is
+ *
+ * This function updates the packet state to the layer at which the packet
+ * currently is
+ *
+ * Return: none
+ */
+void adf_nbuf_set_state(adf_nbuf_t nbuf, uint8_t current_state)
+{
+	/*
+	 * Only Mgmt, Data Packets are tracked. WMI messages
+	 * such as scan commands are not tracked
+	 */
+	uint8_t packet_type;
+
+	packet_type = NBUF_GET_PACKET_TRACK(nbuf);
+
+	if ((packet_type != NBUF_TX_PKT_DATA_TRACK) &&
+	    (packet_type != NBUF_TX_PKT_MGMT_TRACK)) {
+		return;
+	}
+	NBUF_SET_PACKET_STATE(nbuf, current_state);
+	adf_nbuf_tx_desc_count_update(packet_type,
+				      current_state);
+}
 
 adf_nbuf_trace_update_t  trace_update_cb = NULL;
+
+#if defined(CONFIG_WCNSS_MEM_PRE_ALLOC) && defined(FEATURE_SKB_PRE_ALLOC)
+struct sk_buff *__adf_nbuf_pre_alloc(adf_os_device_t osdev, size_t size)
+{
+	struct sk_buff *skb = NULL;
+
+	if (size >= WCNSS_PRE_SKB_ALLOC_GET_THRESHOLD)
+		skb = wcnss_skb_prealloc_get(size);
+
+	return skb;
+}
+
+int __adf_nbuf_pre_alloc_free(struct sk_buff *skb)
+{
+	return wcnss_skb_prealloc_put(skb);
+}
+#else
+struct sk_buff *__adf_nbuf_pre_alloc(adf_os_device_t osdev, size_t size)
+{
+	return NULL;
+}
+
+int __adf_nbuf_pre_alloc_free(struct sk_buff *skb)
+{
+	return 0;
+}
+#endif
 
 /*
  * @brief This allocates an nbuf aligns if needed and reserves
@@ -59,10 +204,17 @@ __adf_nbuf_alloc(adf_os_device_t osdev, size_t size, int reserve, int align, int
 
     skb = dev_alloc_skb(size);
 
+    if (skb)
+       goto skb_cb;
+
+    skb = __adf_nbuf_pre_alloc(osdev, size);
+
     if (!skb) {
         printk("ERROR:NBUF alloc failed\n");
         return NULL;
     }
+
+skb_cb:
     memset(skb->cb, 0x0, sizeof(skb->cb));
 
     /*
@@ -96,6 +248,32 @@ __adf_nbuf_alloc(adf_os_device_t osdev, size_t size, int reserve, int align, int
     return skb;
 }
 
+#ifdef QCA_ARP_SPOOFING_WAR
+/*
+ * __adf_rx_nbuf_alloc() Rx buffer allocation function *
+ * @hdl:
+ * @size:
+ * @reserve:
+ * @align:
+ *
+ * Use existing buffer allocation API and overwrite
+ * priv_data field of skb->cb for registering callback
+ * as it is not used for Rx case.
+ *
+ * Return: nbuf or NULL if no memory
+ */
+struct sk_buff *
+__adf_rx_nbuf_alloc(adf_os_device_t osdev, size_t size, int reserve, int align, int prio)
+{
+    struct sk_buff *skb;
+
+    skb = __adf_nbuf_alloc(osdev, size, reserve,align, prio);
+    if (skb) {
+        NBUF_CB_PTR(skb) = osdev->filter_cb;
+    }
+    return skb;
+}
+#endif
 /*
  * @brief free the nbuf its interrupt safe
  * @param skb
@@ -103,12 +281,19 @@ __adf_nbuf_alloc(adf_os_device_t osdev, size_t size, int reserve, int align, int
 void
 __adf_nbuf_free(struct sk_buff *skb)
 {
-#if defined(IPA_OFFLOAD) && !defined(IPA_UC_OFFLOAD)
+#ifdef QCA_MDM_DEVICE
+#if defined(IPA_OFFLOAD) && (!defined(IPA_UC_OFFLOAD) ||\
+   (defined(IPA_UC_OFFLOAD) && defined(IPA_UC_STA_OFFLOAD)))
     if( (NBUF_OWNER_ID(skb) == IPA_NBUF_OWNER_ID) && NBUF_CALLBACK_FN(skb) )
         NBUF_CALLBACK_FN_EXEC(skb);
     else
 #endif
-    dev_kfree_skb_any(skb);
+#endif /* QCA_MDM_DEVICE */
+    {
+       if (__adf_nbuf_pre_alloc_free(skb))
+           return;
+       dev_kfree_skb_any(skb);
+    }
 }
 
 
@@ -382,6 +567,563 @@ __adf_nbuf_reg_trace_cb(adf_nbuf_trace_update_t cb_func_ptr)
    return;
 }
 
+/**
+ * __adf_nbuf_data_get_dhcp_subtype() - get the subtype
+ *              of DHCP packet.
+ * @data: Pointer to DHCP packet data buffer
+ *
+ * This func. returns the subtype of DHCP packet.
+ *
+ * Return: subtype of the DHCP packet.
+ */
+enum adf_proto_subtype
+__adf_nbuf_data_get_dhcp_subtype(uint8_t *data)
+{
+	enum adf_proto_subtype subtype = ADF_PROTO_INVALID;
+
+	if ((data[DHCP_OPTION53_OFFSET] == DHCP_OPTION53) &&
+		(data[DHCP_OPTION53_LENGTH_OFFSET] ==
+					DHCP_OPTION53_LENGTH)) {
+
+		switch (data[DHCP_OPTION53_STATUS_OFFSET]) {
+		case DHCPDISCOVER:
+			subtype = ADF_PROTO_DHCP_DISCOVER;
+			break;
+		case DHCPREQUEST:
+			subtype = ADF_PROTO_DHCP_REQUEST;
+			break;
+		case DHCPOFFER:
+			subtype = ADF_PROTO_DHCP_OFFER;
+			break;
+		case DHCPACK:
+			subtype = ADF_PROTO_DHCP_ACK;
+			break;
+		case DHCPNAK:
+			subtype = ADF_PROTO_DHCP_NACK;
+			break;
+		case DHCPRELEASE:
+			subtype = ADF_PROTO_DHCP_RELEASE;
+			break;
+		case DHCPINFORM:
+			subtype = ADF_PROTO_DHCP_INFORM;
+			break;
+		case DHCPDECLINE:
+			subtype = ADF_PROTO_DHCP_DECLINE;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return subtype;
+}
+
+/**
+ * __adf_nbuf_data_get_eapol_subtype() - get the subtype
+ *            of EAPOL packet.
+ * @data: Pointer to EAPOL packet data buffer
+ *
+ * This func. returns the subtype of EAPOL packet.
+ *
+ * Return: subtype of the EAPOL packet.
+ */
+enum adf_proto_subtype
+__adf_nbuf_data_get_eapol_subtype(uint8_t *data)
+{
+	uint16_t eapol_key_info;
+	enum adf_proto_subtype subtype = ADF_PROTO_INVALID;
+	uint16_t mask;
+
+	eapol_key_info = (uint16_t)(*(uint16_t *)
+			(data + EAPOL_KEY_INFO_OFFSET));
+
+	mask = eapol_key_info & EAPOL_MASK;
+	switch (mask) {
+	case EAPOL_M1_BIT_MASK:
+		subtype = ADF_PROTO_EAPOL_M1;
+		break;
+	case EAPOL_M2_BIT_MASK:
+		subtype = ADF_PROTO_EAPOL_M2;
+		break;
+	case EAPOL_M3_BIT_MASK:
+		subtype = ADF_PROTO_EAPOL_M3;
+		break;
+	case EAPOL_M4_BIT_MASK:
+		subtype = ADF_PROTO_EAPOL_M4;
+		break;
+	default:
+		break;
+	}
+
+	return subtype;
+}
+
+/**
+ * __adf_nbuf_data_get_arp_subtype() - get the subtype
+ *            of ARP packet.
+ * @data: Pointer to ARP packet data buffer
+ *
+ * This func. returns the subtype of ARP packet.
+ *
+ * Return: subtype of the ARP packet.
+ */
+enum adf_proto_subtype
+__adf_nbuf_data_get_arp_subtype(uint8_t *data)
+{
+	uint16_t subtype;
+	enum adf_proto_subtype proto_subtype = ADF_PROTO_INVALID;
+
+	subtype = (uint16_t)(*(uint16_t *)
+			(data + ARP_SUB_TYPE_OFFSET));
+
+	switch (adf_os_cpu_to_be16(subtype)) {
+	case ARP_REQUEST:
+		proto_subtype = ADF_PROTO_ARP_REQ;
+		break;
+	case ARP_RESPONSE:
+		proto_subtype = ADF_PROTO_ARP_RES;
+		break;
+	default:
+		break;
+	}
+
+	return proto_subtype;
+}
+
+/**
+ * __adf_nbuf_data_get_icmp_subtype() - get the subtype
+ *            of IPV4 ICMP packet.
+ * @data: Pointer to IPV4 ICMP packet data buffer
+ *
+ * This func. returns the subtype of ICMP packet.
+ *
+ * Return: subtype of the ICMP packet.
+ */
+enum adf_proto_subtype
+__adf_nbuf_data_get_icmp_subtype(uint8_t *data)
+{
+	uint8_t subtype;
+	enum adf_proto_subtype proto_subtype = ADF_PROTO_INVALID;
+
+	subtype = (uint8_t)(*(uint8_t *)
+			(data + ICMP_SUBTYPE_OFFSET));
+
+	switch (subtype) {
+	case ICMP_REQUEST:
+		proto_subtype = ADF_PROTO_ICMP_REQ;
+		break;
+	case ICMP_RESPONSE:
+		proto_subtype = ADF_PROTO_ICMP_RES;
+		break;
+	default:
+		break;
+	}
+
+	return proto_subtype;
+}
+
+/**
+ * __adf_nbuf_data_get_icmpv6_subtype() - get the subtype
+ *            of IPV6 ICMPV6 packet.
+ * @data: Pointer to IPV6 ICMPV6 packet data buffer
+ *
+ * This func. returns the subtype of ICMPV6 packet.
+ *
+ * Return: subtype of the ICMPV6 packet.
+ */
+enum adf_proto_subtype
+__adf_nbuf_data_get_icmpv6_subtype(uint8_t *data)
+{
+	uint8_t subtype;
+	enum adf_proto_subtype proto_subtype = ADF_PROTO_INVALID;
+
+	subtype = (uint8_t)(*(uint8_t *)
+			(data + ICMPV6_SUBTYPE_OFFSET));
+
+	switch (subtype) {
+	case ICMPV6_REQUEST:
+		proto_subtype = ADF_PROTO_ICMPV6_REQ;
+		break;
+	case ICMPV6_RESPONSE:
+		proto_subtype = ADF_PROTO_ICMPV6_RES;
+		break;
+	default:
+		break;
+	}
+
+	return proto_subtype;
+}
+
+/**
+ * __adf_nbuf_data_get_ipv4_proto() - get the proto type
+ *            of IPV4 packet.
+ * @data: Pointer to IPV4 packet data buffer
+ *
+ * This func. returns the proto type of IPV4 packet.
+ *
+ * Return: proto type of IPV4 packet.
+ */
+uint8_t
+__adf_nbuf_data_get_ipv4_proto(uint8_t *data)
+{
+	uint8_t proto_type;
+
+	proto_type = (uint8_t)(*(uint8_t *)(data +
+				ADF_NBUF_TRAC_IPV4_PROTO_TYPE_OFFSET));
+	return proto_type;
+}
+
+/**
+ * __adf_nbuf_data_get_ipv6_proto() - get the proto type
+ *            of IPV6 packet.
+ * @data: Pointer to IPV6 packet data buffer
+ *
+ * This func. returns the proto type of IPV6 packet.
+ *
+ * Return: proto type of IPV6 packet.
+ */
+uint8_t
+__adf_nbuf_data_get_ipv6_proto(uint8_t *data)
+{
+	uint8_t proto_type;
+
+	proto_type = (uint8_t)(*(uint8_t *)(data +
+				ADF_NBUF_TRAC_IPV6_PROTO_TYPE_OFFSET));
+	return proto_type;
+}
+
+/**
+ * __adf_nbuf_data_is_dhcp_pkt() - check if it is DHCP packet.
+ * @data: Pointer to DHCP packet data buffer
+ *
+ * This func. checks whether it is a DHCP packet or not.
+ *
+ * Return: A_STATUS_OK if it is a DHCP packet
+ *         A_STATUS_FAILED if not
+ */
+a_status_t
+__adf_nbuf_data_is_dhcp_pkt(uint8_t *data)
+{
+   a_uint16_t    SPort;
+   a_uint16_t    DPort;
+
+    SPort = (a_uint16_t)(*(a_uint16_t *)(data + ADF_NBUF_TRAC_IPV4_OFFSET +
+                                     ADF_NBUF_TRAC_IPV4_HEADER_SIZE));
+    DPort = (a_uint16_t)(*(a_uint16_t *)(data + ADF_NBUF_TRAC_IPV4_OFFSET +
+                                     ADF_NBUF_TRAC_IPV4_HEADER_SIZE + sizeof(a_uint16_t)));
+
+    if (((ADF_NBUF_TRAC_DHCP_SRV_PORT == adf_os_cpu_to_be16(SPort)) &&
+       (ADF_NBUF_TRAC_DHCP_CLI_PORT == adf_os_cpu_to_be16(DPort))) ||
+       ((ADF_NBUF_TRAC_DHCP_CLI_PORT == adf_os_cpu_to_be16(SPort)) &&
+       (ADF_NBUF_TRAC_DHCP_SRV_PORT == adf_os_cpu_to_be16(DPort))))
+    {
+        return A_STATUS_OK;
+    }
+    else
+    {
+        return A_STATUS_FAILED;
+    }
+}
+
+/**
+ * __adf_nbuf_data_is_eapol_pkt() - check if it is EAPOL packet.
+ * @data: Pointer to EAPOL packet data buffer
+ *
+ * This func. checks whether it is a EAPOL packet or not.
+ *
+ * Return: A_STATUS_OK if it is a EAPOL packet
+ *         A_STATUS_FAILED if not
+ */
+a_status_t
+__adf_nbuf_data_is_eapol_pkt(uint8_t *data)
+{
+    a_uint16_t    ether_type;
+
+    ether_type = (a_uint16_t)(*(a_uint16_t *)(data +
+			ADF_NBUF_TRAC_ETH_TYPE_OFFSET));
+    if (ADF_NBUF_TRAC_EAPOL_ETH_TYPE == adf_os_cpu_to_be16(ether_type))
+    {
+        return A_STATUS_OK;
+    }
+    else
+    {
+        return A_STATUS_FAILED;
+    }
+}
+
+/**
+ * __adf_nbuf_data_is_ipv4_arp_pkt() - check if it is ARP packet.
+ * @data: Pointer to ARP packet data buffer
+ *
+ * This func. checks whether it is a ARP packet or not.
+ *
+ * Return: TRUE if it is a ARP packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_ipv4_arp_pkt(uint8_t *data)
+{
+	uint16_t ether_type;
+
+	ether_type = (uint16_t)(*(uint16_t *)(data +
+				ADF_NBUF_TRAC_ETH_TYPE_OFFSET));
+
+	if (ether_type == adf_os_cpu_to_be16(ADF_NBUF_TRAC_ARP_ETH_TYPE))
+		return true;
+	else
+		return false;
+}
+
+/**
+ * __adf_nbuf_data_is_ipv4_pkt() - check if it is IPV4 packet.
+ * @data: Pointer to IPV4 packet data buffer
+ *
+ * This func. checks whether it is a IPV4 packet or not.
+ *
+ * Return: TRUE if it is a IPV4 packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_ipv4_pkt(uint8_t *data)
+{
+	uint16_t ether_type;
+
+	ether_type = (uint16_t)(*(uint16_t *)(data +
+				ADF_NBUF_TRAC_ETH_TYPE_OFFSET));
+
+	if (ether_type == adf_os_cpu_to_be16(ADF_NBUF_TRAC_IPV4_ETH_TYPE))
+		return true;
+	else
+		return false;
+}
+
+/**
+ * __adf_nbuf_data_is_ipv4_mcast_pkt() - check if it is IPV4 multicast packet.
+ * @data: Pointer to IPV4 packet data buffer
+ *
+ * This func. checks whether it is a IPV4 muticast packet or not.
+ *
+ * Return: TRUE if it is a IPV4 multicast packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_ipv4_mcast_pkt(uint8_t *data)
+{
+	if (__adf_nbuf_data_is_ipv4_pkt(data)) {
+		uint8_t *dst_addr =
+			(uint8_t *)(data + ADF_NBUF_TRAC_IPV4_DEST_ADDR_OFFSET);
+
+		/*
+		 * Check first byte of the IP address and if it
+		 * from 224 to 239, then it can represent multicast IP.
+		 */
+		if (dst_addr[0] >= 224 && dst_addr[0]  <= 239)
+			return true;
+		else
+			return false;
+	} else
+		return false;
+}
+
+/**
+ * __adf_nbuf_data_is_ipv6_mcast_pkt() - check if it is IPV6 multicast packet.
+ * @data: Pointer to IPV6 packet data buffer
+ *
+ * This func. checks whether it is a IPV6 muticast packet or not.
+ *
+ * Return: TRUE if it is a IPV6 multicast packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_ipv6_mcast_pkt(uint8_t *data)
+{
+	if (__adf_nbuf_data_is_ipv6_pkt(data)) {
+		uint16_t *dst_addr;
+
+		dst_addr = (uint16_t *)
+			(data + ADF_NBUF_TRAC_IPV6_DEST_ADDR_OFFSET);
+
+		/*
+		 * Check first byte of the IP address and if it
+		 * 0xFF00 then it is a IPV6 mcast packet.
+		 */
+		if (*dst_addr ==
+		     adf_os_cpu_to_be16(ADF_NBUF_TRAC_IPV6_DEST_ADDR))
+			return true;
+		else
+			return false;
+	} else
+		return false;
+}
+
+/**
+ * __adf_nbuf_data_is_ipv6_pkt() - check if it is IPV6 packet.
+ * @data: Pointer to IPV6 packet data buffer
+ *
+ * This func. checks whether it is a IPV6 packet or not.
+ *
+ * Return: TRUE if it is a IPV6 packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_ipv6_pkt(uint8_t *data)
+{
+	uint16_t ether_type;
+
+	ether_type = (uint16_t)(*(uint16_t *)(data +
+				ADF_NBUF_TRAC_ETH_TYPE_OFFSET));
+
+	if (ether_type == adf_os_cpu_to_be16(ADF_NBUF_TRAC_IPV6_ETH_TYPE))
+		return true;
+	else
+		return false;
+}
+
+/**
+ * __adf_nbuf_data_is_icmp_pkt() - check if it is IPV4 ICMP packet.
+ * @data: Pointer to IPV4 ICMP packet data buffer
+ *
+ * This func. checks whether it is a ICMP packet or not.
+ *
+ * Return: TRUE if it is a ICMP packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_icmp_pkt(uint8_t *data)
+{
+	if (__adf_nbuf_data_is_ipv4_pkt(data)) {
+		uint8_t pkt_type;
+
+		pkt_type = (uint8_t)(*(uint8_t *)(data +
+				ADF_NBUF_TRAC_IPV4_PROTO_TYPE_OFFSET));
+
+		if (pkt_type == ADF_NBUF_TRAC_ICMP_TYPE)
+			return true;
+		else
+			return false;
+	} else
+		return false;
+}
+
+/**
+ * __adf_nbuf_data_is_icmpv6_pkt() - check if it is IPV6 ICMPV6 packet.
+ * @data: Pointer to IPV6 ICMPV6 packet data buffer
+ *
+ * This func. checks whether it is a ICMPV6 packet or not.
+ *
+ * Return: TRUE if it is a ICMPV6 packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_icmpv6_pkt(uint8_t *data)
+{
+	if (__adf_nbuf_data_is_ipv6_pkt(data)) {
+		uint8_t pkt_type;
+
+		pkt_type = (uint8_t)(*(uint8_t *)(data +
+				ADF_NBUF_TRAC_IPV6_PROTO_TYPE_OFFSET));
+
+		if (pkt_type == ADF_NBUF_TRAC_ICMPV6_TYPE)
+			return true;
+		else
+			return false;
+	} else
+		return false;
+}
+
+/**
+ * __adf_nbuf_data_is_ipv4_udp_pkt() - check if it is IPV4 UDP packet.
+ * @data: Pointer to IPV4 UDP packet data buffer
+ *
+ * This func. checks whether it is a IPV4 UDP packet or not.
+ *
+ * Return: TRUE if it is a IPV4 UDP packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_ipv4_udp_pkt(uint8_t *data)
+{
+	if (__adf_nbuf_data_is_ipv4_pkt(data)) {
+		uint8_t pkt_type;
+
+		pkt_type = (uint8_t)(*(uint8_t *)(data +
+				ADF_NBUF_TRAC_IPV4_PROTO_TYPE_OFFSET));
+
+		if (pkt_type == ADF_NBUF_TRAC_UDP_TYPE)
+			return true;
+		else
+			return false;
+	} else
+		return false;
+}
+
+/**
+ * __adf_nbuf_data_is_ipv4_tcp_pkt() - check if it is IPV4 TCP packet.
+ * @data: Pointer to IPV4 TCP packet data buffer
+ *
+ * This func. checks whether it is a IPV4 TCP packet or not.
+ *
+ * Return: TRUE if it is a IPV4 TCP packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_ipv4_tcp_pkt(uint8_t *data)
+{
+	if (__adf_nbuf_data_is_ipv4_pkt(data)) {
+		uint8_t pkt_type;
+
+		pkt_type = (uint8_t)(*(uint8_t *)(data +
+				ADF_NBUF_TRAC_IPV4_PROTO_TYPE_OFFSET));
+
+		if (pkt_type == ADF_NBUF_TRAC_TCP_TYPE)
+			return true;
+		else
+			return false;
+	} else
+		return false;
+}
+
+/**
+ * __adf_nbuf_data_is_ipv6_udp_pkt() - check if it is IPV6 UDP packet.
+ * @data: Pointer to IPV6 UDP packet data buffer
+ *
+ * This func. checks whether it is a IPV6 UDP packet or not.
+ *
+ * Return: TRUE if it is a IPV6 UDP packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_ipv6_udp_pkt(uint8_t *data)
+{
+	if (__adf_nbuf_data_is_ipv6_pkt(data)) {
+		uint8_t pkt_type;
+
+		pkt_type = (uint8_t)(*(uint8_t *)(data +
+				ADF_NBUF_TRAC_IPV6_PROTO_TYPE_OFFSET));
+
+		if (pkt_type == ADF_NBUF_TRAC_UDP_TYPE)
+			return true;
+		else
+			return false;
+	} else
+		return false;
+}
+
+/**
+ * __adf_nbuf_data_is_ipv6_tcp_pkt() - check if it is IPV6 TCP packet.
+ * @data: Pointer to IPV6 TCP packet data buffer
+ *
+ * This func. checks whether it is a IPV6 TCP packet or not.
+ *
+ * Return: TRUE if it is a IPV6 TCP packet
+ *         FALSE if not
+ */
+bool __adf_nbuf_data_is_ipv6_tcp_pkt(uint8_t *data)
+{
+	if (__adf_nbuf_data_is_ipv6_pkt(data)) {
+		uint8_t pkt_type;
+
+		pkt_type = (uint8_t)(*(uint8_t *)(data +
+				ADF_NBUF_TRAC_IPV6_PROTO_TYPE_OFFSET));
+
+		if (pkt_type == ADF_NBUF_TRAC_TCP_TYPE)
+			return true;
+		else
+			return false;
+	} else
+		return false;
+}
+
 #ifdef QCA_PKT_PROTO_TRACE
 void
 __adf_nbuf_trace_update(struct sk_buff *buf, char *event_string)
@@ -429,22 +1171,148 @@ __adf_nbuf_trace_update(struct sk_buff *buf, char *event_string)
 }
 #endif /* QCA_PKT_PROTO_TRACE */
 
-EXPORT_SYMBOL(__adf_nbuf_alloc);
-EXPORT_SYMBOL(__adf_nbuf_free);
-EXPORT_SYMBOL(__adf_nbuf_ref);
-EXPORT_SYMBOL(__adf_nbuf_shared);
-EXPORT_SYMBOL(__adf_nbuf_frag_info);
-EXPORT_SYMBOL(__adf_nbuf_dmamap_create);
-EXPORT_SYMBOL(__adf_nbuf_dmamap_destroy);
-EXPORT_SYMBOL(__adf_nbuf_map);
-EXPORT_SYMBOL(__adf_nbuf_unmap);
-EXPORT_SYMBOL(__adf_nbuf_map_single);
-EXPORT_SYMBOL(__adf_nbuf_unmap_single);
-EXPORT_SYMBOL(__adf_nbuf_dmamap_info);
-EXPORT_SYMBOL(__adf_nbuf_set_rx_cksum);
-EXPORT_SYMBOL(__adf_nbuf_get_tx_cksum);
-EXPORT_SYMBOL(__adf_nbuf_get_vlan_info);
-EXPORT_SYMBOL(__adf_nbuf_get_tid);
-EXPORT_SYMBOL(__adf_nbuf_set_tid);
-EXPORT_SYMBOL(__adf_nbuf_get_exemption_type);
-EXPORT_SYMBOL(__adf_nbuf_dmamap_set_cb);
+/**
+ * adf_nbuf_update_radiotap() - Update radiotap header from rx_status
+ *
+ * @rx_status: Pointer to rx_status.
+ * @nbuf:      nbuf pointe to which radiotap has to be updated
+ * @headroom_sz: Available headroom size.
+ *
+ * Return: length of rtap_len updated.
+ */
+int adf_nbuf_update_radiotap(struct mon_rx_status *rx_status, adf_nbuf_t nbuf,
+			     u_int32_t headroom_sz)
+{
+	uint8_t rtap_buf[sizeof(struct ieee80211_radiotap_header) + 100] = {0};
+	struct ieee80211_radiotap_header *rthdr =
+		(struct ieee80211_radiotap_header *)rtap_buf;
+	uint32_t rtap_hdr_len = sizeof(struct ieee80211_radiotap_header);
+	uint32_t rtap_len = rtap_hdr_len;
+
+	/* IEEE80211_RADIOTAP_TSFT              __le64       microseconds*/
+	rthdr->it_present = cpu_to_le32(1 << IEEE80211_RADIOTAP_TSFT);
+	put_unaligned_le64(rx_status->tsft,
+			   (void *)&rtap_buf[rtap_len]);
+	rtap_len += 8;
+
+	/* IEEE80211_RADIOTAP_FLAGS u8*/
+	rthdr->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_FLAGS);
+	rtap_buf[rtap_len] = rx_status->flags;
+	rtap_len += 1;
+
+	/* IEEE80211_RADIOTAP_RATE  u8           500kb/s*/
+	rthdr->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_RATE);
+	rtap_buf[rtap_len] = rx_status->rate;
+	rtap_len += 1;
+	rthdr->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_CHANNEL);
+	/* IEEE80211_RADIOTAP_CHANNEL, Channel frequency in Mhz */
+	put_unaligned_le16(rx_status->chan, (void *)&rtap_buf[rtap_len]);
+	rtap_len += 2;
+	/* Channel flags. */
+
+	put_unaligned_le16(rx_status->chan_flags, (void *)&rtap_buf[rtap_len]);
+	rtap_len += 2;
+
+	/* IEEE80211_RADIOTAP_DBM_ANTSIGNAL */
+	rthdr->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_DBM_ANTSIGNAL);
+#define NORMALIZED_TO_NOISE_FLOOR (-96)
+	/*
+	 * rssi_comb is int dB, need to convert it to dBm.
+	 * normalize value to noise floor of -96 dBm
+	 */
+	rtap_buf[rtap_len] = rx_status->ant_signal_db +
+		NORMALIZED_TO_NOISE_FLOOR;
+	rtap_len += 1;
+	rthdr->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_ANTENNA);
+	rtap_buf[rtap_len] = rx_status->nr_ant;
+	rtap_len += 1;
+
+	rthdr->it_len = cpu_to_le16(rtap_len);
+
+	adf_nbuf_pull_head(nbuf, headroom_sz  - rtap_len);
+	adf_os_mem_copy(adf_nbuf_data(nbuf), rthdr, rtap_hdr_len);
+	adf_os_mem_copy(adf_nbuf_data(nbuf) + rtap_hdr_len, rtap_buf +
+			rtap_hdr_len, rtap_len - rtap_hdr_len);
+	return rtap_len;
+}
+
+/**
+ * __adf_nbuf_validate_skb_cb() - validate skb CB
+ *
+ * SKB control block size limit is 48 byte, add compile time
+ * assert if SKB control block is exceeding 48 byte.
+ *
+ * Return: none
+ */
+void
+__adf_nbuf_validate_skb_cb(void)
+{
+	/*
+	 * Add compile time assert if SKB control block is exceeding
+	 * 48 byte.
+	 */
+	BUILD_BUG_ON(sizeof(struct cvg_nbuf_cb) >
+		FIELD_SIZEOF(struct sk_buff, cb));
+}
+
+/**
+ * __adf_nbuf_is_wai() - Check if frame is WAI
+ * @data: pointer to skb data buffer
+ *
+ * This function checks if the frame is WAPI.
+ *
+ * Return: true (1) if WAPI
+ *
+ */
+bool __adf_nbuf_is_wai_pkt(uint8_t *data)
+{
+	uint16_t ether_type;
+
+	ether_type = (uint16_t)(*(uint16_t *)
+			(data + ADF_NBUF_TRAC_ETH_TYPE_OFFSET));
+
+	if (ether_type == VOS_SWAP_U16(ADF_NBUF_TRAC_WAI_ETH_TYPE))
+		return true;
+
+	return false;
+}
+
+/**
+ * __adf_nbuf_is_group_pkt() - Check if frame is multicast packet
+ * @data: pointer to skb data buffer
+ *
+ * This function checks if the frame is multicast packet.
+ *
+ * Return: true (1) if multicast
+ *
+ */
+bool __adf_nbuf_is_multicast_pkt(uint8_t *data)
+{
+	struct adf_mac_addr *mac_addr = (struct adf_mac_addr*)data;
+
+	if ( mac_addr->bytes[0] & 0x01 )
+		return true;
+
+	return false;
+}
+
+/**
+ * __adf_nbuf_is_bcast_pkt() - Check if frame is broadcast packet
+ * @data: pointer to skb data buffer
+ *
+ * This function checks if the frame is broadcast packet.
+ *
+ * Return: true (1) if broadcast
+ *
+ */
+bool __adf_nbuf_is_bcast_pkt(uint8_t *data)
+{
+	struct adf_mac_addr *mac_addr = (struct adf_mac_addr*)data;
+	struct adf_mac_addr bcast_addr = VOS_MAC_ADDR_BROADCAST_INITIALIZER;
+
+	if (!memcmp( mac_addr, &bcast_addr, VOS_MAC_ADDR_SIZE))
+		return true;
+
+	return false;
+}
+

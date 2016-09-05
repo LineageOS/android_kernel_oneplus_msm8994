@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2015 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -71,6 +71,28 @@
 #include <ol_txrx.h>
 
 /*=== function definitions ===*/
+
+/**
+ * ol_tx_mark_first_wakeup_packet() - set flag to indicate that
+ *    fw is compatible for marking first packet after wow wakeup
+ * @value: 1 for enabled/ 0 for disabled
+ *
+ * Return: None
+ */
+void ol_tx_mark_first_wakeup_packet(uint8_t value)
+{
+	void *vos_context = vos_get_global_context(VOS_MODULE_ID_TXRX, NULL);
+	struct ol_txrx_pdev_t *pdev = vos_get_context(VOS_MODULE_ID_TXRX,
+						vos_context);
+
+	if (!pdev) {
+		TXRX_PRINT(TXRX_PRINT_LEVEL_ERR,
+			"%s: pdev is NULL\n", __func__);
+		return;
+	}
+
+	htt_mark_first_wakeup_packet(pdev->htt_pdev, value);
+}
 
 u_int16_t
 ol_tx_desc_pool_size_hl(ol_pdev_handle ctrl_pdev)
@@ -238,22 +260,104 @@ OL_TXRX_LOCAL_PEER_ID_CLEANUP(struct ol_txrx_pdev_t *pdev)
 #define OL_TXRX_LOCAL_PEER_ID_CLEANUP(pdev)     /* no-op */
 #endif
 
+#ifdef FEATURE_HL_GROUP_CREDIT_FLOW_CONTROL
+void
+ol_txrx_update_group_credit(
+    struct ol_tx_queue_group_t *group,
+    int32_t credit,
+    u_int8_t absolute)
+{
+    if (absolute) {
+        adf_os_atomic_set(&group->credit, credit);
+    } else {
+        adf_os_atomic_add(credit, &group->credit);
+    }
+}
+
+void
+ol_txrx_update_tx_queue_groups(
+    ol_txrx_pdev_handle pdev,
+    u_int8_t group_id,
+    int32_t credit,
+    u_int8_t absolute,
+    u_int32_t vdev_id_mask,
+    u_int32_t ac_mask
+)
+{
+    struct ol_tx_queue_group_t *group;
+    u_int32_t group_vdev_bit_mask, vdev_bit_mask, group_vdev_id_mask;
+    u_int32_t membership;
+    struct ol_txrx_vdev_t *vdev;
+    group = &pdev->txq_grps[group_id];
+
+    membership = OL_TXQ_GROUP_MEMBERSHIP_GET(vdev_id_mask,ac_mask);
+
+    adf_os_spin_lock_bh(&pdev->tx_queue_spinlock);
+    /*
+     * if the membership (vdev id mask and ac mask)
+     * matches then no need to update tx qeue groups.
+     */
+    if (group->membership == membership) {
+       /* Update Credit Only */
+       goto credit_update;
+    }
+
+    /*
+     * membership (vdev id mask and ac mask) is not matching
+     * TODO: ignoring ac mask for now
+     */
+    group_vdev_id_mask =
+        OL_TXQ_GROUP_VDEV_ID_MASK_GET(group->membership);
+
+    TAILQ_FOREACH(vdev, &pdev->vdev_list, vdev_list_elem) {
+        group_vdev_bit_mask =
+           OL_TXQ_GROUP_VDEV_ID_BIT_MASK_GET(group_vdev_id_mask,vdev->vdev_id);
+        vdev_bit_mask =
+           OL_TXQ_GROUP_VDEV_ID_BIT_MASK_GET(vdev_id_mask,vdev->vdev_id);
+
+        if (group_vdev_bit_mask != vdev_bit_mask) {
+            /*
+             * Change in vdev tx queue group
+             */
+            if (!vdev_bit_mask) {
+                /* Set Group Pointer (vdev and peer) to NULL */
+                ol_tx_set_vdev_group_ptr(pdev, vdev->vdev_id, NULL);
+            } else {
+                /* Set Group Pointer (vdev and peer) */
+                ol_tx_set_vdev_group_ptr(pdev, vdev->vdev_id, group);
+            }
+        }
+    }
+    /* Update membership */
+    group->membership = membership;
+credit_update:
+    /* Update Credit */
+    ol_txrx_update_group_credit(group, credit, absolute);
+    adf_os_spin_unlock_bh(&pdev->tx_queue_spinlock);
+}
+#endif
+
 ol_txrx_pdev_handle
 ol_txrx_pdev_attach(
     ol_pdev_handle ctrl_pdev,
     HTC_HANDLE htc_pdev,
     adf_os_device_t osdev)
 {
-    int i;
+    uint16_t i, tid, fail_idx = 0;
     struct ol_txrx_pdev_t *pdev;
 #ifdef WDI_EVENT_ENABLE
     A_STATUS ret;
 #endif
-    u_int16_t desc_pool_size;
+    uint16_t desc_pool_size;
+    uint16_t desc_element_size = sizeof(union ol_tx_desc_list_elem_t);
+    union ol_tx_desc_list_elem_t *c_element;
+    unsigned int sig_bit;
+    uint16_t desc_per_page;
+
 
     pdev = adf_os_mem_alloc(osdev, sizeof(*pdev));
     if (!pdev) {
-        goto fail0;
+        goto ol_attach_fail;
     }
     adf_os_mem_zero(pdev, sizeof(*pdev));
 
@@ -275,7 +379,7 @@ ol_txrx_pdev_attach(
 
     /* do initial set up of the peer ID -> peer object lookup map */
     if (ol_txrx_peer_find_attach(pdev)) {
-        goto fail1;
+        goto peer_find_attach_fail;
     }
 
     if (ol_cfg_is_high_latency(ctrl_pdev)) {
@@ -288,12 +392,20 @@ ol_txrx_pdev_attach(
          * Define the value seperately.
          */
         pdev->tx_queue.rsrc_threshold_lo = TXRX_HL_TX_FLOW_CTRL_MGMT_RESERVED;
+
+        /* when freeing up descriptors, keep going until there's a 7.5% margin */
+        pdev->tx_queue.rsrc_threshold_hi = ((15 * desc_pool_size)/100)/2;
 #else
         /* always maintain a 5% margin of unallocated descriptors */
         pdev->tx_queue.rsrc_threshold_lo = (5 * desc_pool_size)/100;
-#endif
+
         /* when freeing up descriptors, keep going until there's a 15% margin */
         pdev->tx_queue.rsrc_threshold_hi = (15 * desc_pool_size)/100;
+#endif
+        for (i = 0 ; i < OL_TX_MAX_TXQ_GROUPS; i++) {
+            adf_os_atomic_init(&pdev->txq_grps[i].credit);
+        }
+
     } else {
         /*
          * For LL, limit the number of host's tx descriptors to match the
@@ -319,29 +431,54 @@ ol_txrx_pdev_attach(
             ol_cfg_target_tx_credit(pdev->ctrl_pdev), &pdev->target_tx_credit);
     }
 
+    if (ol_cfg_is_high_latency(ctrl_pdev)) {
+        ol_tx_target_credit_init(pdev, desc_pool_size);
+    }
+
     pdev->htt_pdev = htt_attach(
         pdev, ctrl_pdev, htc_pdev, osdev, desc_pool_size);
     if (!pdev->htt_pdev) {
-        goto fail2;
+        goto htt_attach_fail;
     }
+
+    htt_register_rx_pkt_dump_callback(pdev->htt_pdev,
+                          ol_rx_pkt_dump_call);
+
+    adf_os_mem_zero(pdev->pn_replays,
+                    OL_RX_NUM_PN_REPLAY_TYPES * sizeof(uint32_t));
 
 #ifdef IPA_UC_OFFLOAD
     /* Attach micro controller data path offload resource */
     if (ol_cfg_ipa_uc_offload_enabled(ctrl_pdev)) {
        if (htt_ipa_uc_attach(pdev->htt_pdev)) {
-           goto fail3;
+           goto uc_attach_fail;
        }
     }
 #endif /* IPA_UC_OFFLOAD */
 
-    pdev->tx_desc.array = adf_os_mem_alloc(
-        osdev, desc_pool_size * sizeof(union ol_tx_desc_list_elem_t));
-    if (!pdev->tx_desc.array) {
-        goto fail3;
+    /* Calculate single element reserved size power of 2 */
+    pdev->tx_desc.desc_reserved_size = adf_os_get_pwr2(desc_element_size);
+    adf_os_mem_multi_pages_alloc(pdev->osdev, &pdev->tx_desc.desc_pages,
+        pdev->tx_desc.desc_reserved_size, desc_pool_size, 0, true);
+    if ((0 == pdev->tx_desc.desc_pages.num_pages) ||
+            (NULL == pdev->tx_desc.desc_pages.cacheable_pages)) {
+        TXRX_PRINT(TXRX_PRINT_LEVEL_ERR, "Page alloc fail");
+        goto page_alloc_fail;
     }
-    adf_os_mem_set(
-        pdev->tx_desc.array, 0,
-        desc_pool_size * sizeof(union ol_tx_desc_list_elem_t));
+    desc_per_page = pdev->tx_desc.desc_pages.num_element_per_page;
+    pdev->tx_desc.offset_filter = desc_per_page - 1;
+    /* Calculate page divider to find page number */
+    sig_bit = 0;
+    while (desc_per_page) {
+        sig_bit++;
+        desc_per_page = desc_per_page >> 1;
+    }
+    pdev->tx_desc.page_divider = (sig_bit - 1);
+    TXRX_PRINT(TXRX_PRINT_LEVEL_ERR,
+        "page_divider 0x%x, offset_filter 0x%x num elem %d, ol desc num page %d, ol desc per page %d",
+        pdev->tx_desc.page_divider, pdev->tx_desc.offset_filter,
+        desc_pool_size, pdev->tx_desc.desc_pages.num_pages,
+        pdev->tx_desc.desc_pages.num_element_per_page);
 
     /*
      * Each SW tx desc (used only within the tx datapath SW) has a
@@ -350,42 +487,50 @@ ol_txrx_pdev_attach(
      * desc now, to avoid doing it during time-critical transmit.
      */
     pdev->tx_desc.pool_size = desc_pool_size;
+    pdev->tx_desc.freelist =
+        (union ol_tx_desc_list_elem_t *)
+        (*pdev->tx_desc.desc_pages.cacheable_pages);
+    c_element = pdev->tx_desc.freelist;
+
     for (i = 0; i < desc_pool_size; i++) {
         void *htt_tx_desc;
         u_int32_t paddr_lo;
+
+        if (i == (desc_pool_size - 1))
+            c_element->next = NULL;
+        else
+            c_element->next = (union ol_tx_desc_list_elem_t *)
+                ol_tx_desc_find(pdev, i + 1);
+
         htt_tx_desc = htt_tx_desc_alloc(pdev->htt_pdev, &paddr_lo);
         if (! htt_tx_desc) {
             VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_FATAL,
                 "%s: failed to alloc HTT tx desc (%d of %d)\n",
                 __func__, i, desc_pool_size);
-            while (--i >= 0) {
-                htt_tx_desc_free(
-                    pdev->htt_pdev,
-                    pdev->tx_desc.array[i].tx_desc.htt_tx_desc);
-            }
-            goto fail4;
+            fail_idx = i;
+            goto desc_alloc_fail;
         }
-        pdev->tx_desc.array[i].tx_desc.htt_tx_desc = htt_tx_desc;
-	pdev->tx_desc.array[i].tx_desc.htt_tx_desc_paddr = paddr_lo;
+        c_element->tx_desc.htt_tx_desc = htt_tx_desc;
+        c_element->tx_desc.htt_tx_desc_paddr = paddr_lo;
 #ifdef QCA_SUPPORT_TXDESC_SANITY_CHECKS
-        pdev->tx_desc.array[i].tx_desc.pkt_type = 0xff;
+        c_element->tx_desc.pkt_type = 0xff;
 #ifdef QCA_COMPUTE_TX_DELAY
-        pdev->tx_desc.array[i].tx_desc.entry_timestamp_ticks = 0xffffffff;
+        c_element->tx_desc.entry_timestamp_ticks = 0xffffffff;
 #endif
 #endif
+        c_element->tx_desc.id = i;
+        adf_os_atomic_init(&c_element->tx_desc.ref_cnt);
+        c_element = c_element->next;
+        fail_idx = i;
+
     }
 
     /* link SW tx descs into a freelist */
     pdev->tx_desc.num_free = desc_pool_size;
-    pdev->tx_desc.freelist = &pdev->tx_desc.array[0];
     TXRX_PRINT(TXRX_PRINT_LEVEL_INFO1,
                "%s first tx_desc:0x%p Last tx desc:0x%p\n", __func__,
                (u_int32_t *) pdev->tx_desc.freelist,
                (u_int32_t *) (pdev->tx_desc.freelist + desc_pool_size));
-    for (i = 0; i < desc_pool_size-1; i++) {
-        pdev->tx_desc.array[i].next = &pdev->tx_desc.array[i+1];
-    }
-    pdev->tx_desc.array[i].next = NULL;
 
     /* check what format of frames are expected to be delivered by the OS */
     pdev->frame_format = ol_cfg_frame_type(pdev->ctrl_pdev);
@@ -397,7 +542,7 @@ ol_txrx_pdev_attach(
         VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_ERROR,
             "%s Invalid standard frame type: %d\n",
             __func__, pdev->frame_format);
-        goto fail5;
+        goto control_init_fail;
     }
 
     /* setup the global rx defrag waitlist */
@@ -457,7 +602,7 @@ ol_txrx_pdev_attach(
             pdev->frame_format,
             pdev->target_tx_tran_caps,
             pdev->target_rx_tran_caps);
-        goto fail5;
+        goto control_init_fail;
     }
 #endif
 
@@ -503,7 +648,7 @@ ol_txrx_pdev_attach(
                     "%s: invalid config: if rx PN check is on the host,"
                     "rx->tx forwarding check needs to also be on the host.\n",
                     __func__);
-                goto fail5;
+                goto control_init_fail;
             }
         } else {
             /* PN check done on target */
@@ -533,16 +678,16 @@ ol_txrx_pdev_attach(
         adf_os_spinlock_init(&pdev->tx_queue_spinlock);
         pdev->tx_sched.scheduler = ol_tx_sched_attach(pdev);
         if (pdev->tx_sched.scheduler == NULL) {
-            goto fail6;
+            goto sched_attach_fail;
         }
     }
 
     if (OL_RX_REORDER_TRACE_ATTACH(pdev) != A_OK) {
-        goto fail7;
+        goto reorder_trace_attach_fail;
     }
 
     if (OL_RX_PN_TRACE_ATTACH(pdev) != A_OK) {
-        goto fail8;
+        goto pn_trace_attach_fail;
     }
 
 #ifdef PERE_IP_HDR_ALIGNMENT_WAR
@@ -580,14 +725,20 @@ ol_txrx_pdev_attach(
 
     TXRX_PRINT(TXRX_PRINT_LEVEL_INFO1, "Created pdev %p\n", pdev);
 
-    #if defined(CONFIG_HL_SUPPORT) && defined(ENABLE_TX_QUEUE_LOG)
+    #if defined(CONFIG_HL_SUPPORT) && defined(DEBUG_HL_LOGGING)
+    adf_os_spinlock_init(&pdev->txq_log_spinlock);
     pdev->txq_log.size = OL_TXQ_LOG_SIZE;
     pdev->txq_log.oldest_record_offset = 0;
     pdev->txq_log.offset = 0;
     pdev->txq_log.allow_wrap = 1;
     pdev->txq_log.wrapped = 0;
-    #endif /* defined(CONFIG_HL_SUPPORT) && defined(ENABLE_TX_QUEUE_LOG) */
+    #endif /* defined(CONFIG_HL_SUPPORT) && defined(DEBUG_HL_LOGGING) */
 
+#ifdef DEBUG_HL_LOGGING
+    adf_os_spinlock_init(&pdev->grp_stat_spinlock);
+    pdev->grp_stats.last_valid_index = -1;
+    pdev->grp_stats.wrap_around= 0;
+#endif
     pdev->cfg.host_addba = ol_cfg_host_addba(ctrl_pdev);
 
     #ifdef QCA_SUPPORT_PEER_DATA_RX_RSSI
@@ -608,6 +759,9 @@ ol_txrx_pdev_attach(
     OL_TXRX_LOCAL_PEER_ID_POOL_INIT(pdev);
 
     pdev->cfg.ll_pause_txq_limit = ol_tx_cfg_max_tx_queue_depth_ll(ctrl_pdev);
+
+    /* TX flow control for peer who is in very bad link status */
+    ol_tx_badpeer_flow_cl_init(pdev);
 
 #ifdef QCA_COMPUTE_TX_DELAY
     adf_os_mem_zero(&pdev->tx_delay, sizeof(pdev->tx_delay));
@@ -654,12 +808,31 @@ ol_txrx_pdev_attach(
     /* Thermal Mitigation */
     ol_tx_throttle_init(pdev);
 #endif
+
+    /*
+     * Init the tid --> category table.
+     * Regular tids (0-15) map to their AC.
+     * Extension tids get their own categories.
+     */
+    for (tid = 0; tid < OL_TX_NUM_QOS_TIDS; tid++) {
+        int ac = TXRX_TID_TO_WMM_AC(tid);
+        pdev->tid_to_ac[tid] = ac;
+    }
+    pdev->tid_to_ac[OL_TX_NON_QOS_TID] =
+        OL_TX_SCHED_WRR_ADV_CAT_NON_QOS_DATA;
+    pdev->tid_to_ac[OL_TX_MGMT_TID] =
+        OL_TX_SCHED_WRR_ADV_CAT_UCAST_MGMT;
+    pdev->tid_to_ac[OL_TX_NUM_TIDS + OL_TX_VDEV_MCAST_BCAST] =
+        OL_TX_SCHED_WRR_ADV_CAT_MCAST_DATA;
+    pdev->tid_to_ac[OL_TX_NUM_TIDS + OL_TX_VDEV_DEFAULT_MGMT] =
+        OL_TX_SCHED_WRR_ADV_CAT_MCAST_MGMT;
+
     return pdev; /* success */
 
-fail8:
+pn_trace_attach_fail:
     OL_RX_REORDER_TRACE_DETACH(pdev);
 
-fail7:
+reorder_trace_attach_fail:
     adf_os_spinlock_destroy(&pdev->tx_mutex);
     adf_os_spinlock_destroy(&pdev->peer_ref_mutex);
     adf_os_spinlock_destroy(&pdev->rx.mutex);
@@ -668,35 +841,40 @@ fail7:
 
     ol_tx_sched_detach(pdev);
 
-fail6:
+sched_attach_fail:
     if (ol_cfg_is_high_latency(ctrl_pdev)) {
         adf_os_spinlock_destroy(&pdev->tx_queue_spinlock);
     }
 
-fail5:
-    for (i = 0; i < desc_pool_size; i++) {
+control_init_fail:
+desc_alloc_fail:
+    for (i = 0; i < fail_idx; i++) {
         htt_tx_desc_free(
-            pdev->htt_pdev, pdev->tx_desc.array[i].tx_desc.htt_tx_desc);
+            pdev->htt_pdev, (ol_tx_desc_find(pdev, i))->htt_tx_desc);
     }
 
-fail4:
-    adf_os_mem_free(pdev->tx_desc.array);
+    adf_os_mem_multi_pages_free(pdev->osdev,
+        &pdev->tx_desc.desc_pages, 0, true);
+
+page_alloc_fail:
 #ifdef IPA_UC_OFFLOAD
     if (ol_cfg_ipa_uc_offload_enabled(pdev->ctrl_pdev)) {
        htt_ipa_uc_detach(pdev->htt_pdev);
     }
 #endif /* IPA_UC_OFFLOAD */
 
-fail3:
+#ifdef IPA_UC_OFFLOAD
+uc_attach_fail:
     htt_detach(pdev->htt_pdev);
+#endif
 
-fail2:
+htt_attach_fail:
     ol_txrx_peer_find_detach(pdev);
 
-fail1:
+peer_find_attach_fail:
     adf_os_mem_free(pdev);
 
-fail0:
+ol_attach_fail:
     return NULL; /* fail */
 }
 
@@ -709,6 +887,7 @@ void
 ol_txrx_pdev_detach(ol_txrx_pdev_handle pdev, int force)
 {
     int i;
+
     /*checking to ensure txrx pdev structure is not NULL */
     if (!pdev) {
         TXRX_PRINT(TXRX_PRINT_LEVEL_ERR, "NULL pdev passed to %s\n", __func__);
@@ -734,6 +913,7 @@ ol_txrx_pdev_detach(ol_txrx_pdev_handle pdev, int force)
     adf_os_timer_free(&pdev->tx_throttle.tx_timer);
 #endif
 #endif
+
     if (force) {
         /*
          * The assertion above confirms that all vdevs within this pdev
@@ -750,12 +930,16 @@ ol_txrx_pdev_detach(ol_txrx_pdev_handle pdev, int force)
         ol_txrx_peer_find_hash_erase(pdev);
     }
 
+    htt_deregister_rx_pkt_dump_callback(pdev->htt_pdev);
+
     /* Stop the communication between HTT and target at first */
     htt_detach_target(pdev->htt_pdev);
 
     for (i = 0; i < pdev->tx_desc.pool_size; i++) {
         void *htt_tx_desc;
+        struct ol_tx_desc_t *tx_desc;
 
+        tx_desc = ol_tx_desc_find(pdev, i);
         /*
          * Confirm that each tx descriptor is "empty", i.e. it has
          * no tx frame attached.
@@ -763,18 +947,20 @@ ol_txrx_pdev_detach(ol_txrx_pdev_handle pdev, int force)
          * been given to the target to transmit, for which the
          * target has never provided a response.
          */
-        if (adf_os_atomic_read(&pdev->tx_desc.array[i].tx_desc.ref_cnt)) {
+        if (adf_os_atomic_read(&tx_desc->ref_cnt)) {
             TXRX_PRINT(TXRX_PRINT_LEVEL_WARN,
                 "Warning: freeing tx frame "
                 "(no tx completion from the target)\n");
             ol_tx_desc_frame_free_nonstd(
-                pdev, &pdev->tx_desc.array[i].tx_desc, 1);
+                pdev, tx_desc, 1);
         }
-        htt_tx_desc = pdev->tx_desc.array[i].tx_desc.htt_tx_desc;
+        htt_tx_desc = tx_desc->htt_tx_desc;
         htt_tx_desc_free(pdev->htt_pdev, htt_tx_desc);
     }
 
-    adf_os_mem_free(pdev->tx_desc.array);
+    adf_os_mem_multi_pages_free(pdev->osdev,
+        &pdev->tx_desc.desc_pages, 0, true);
+    pdev->tx_desc.freelist = NULL;
 
 #ifdef IPA_UC_OFFLOAD
     /* Detach micro controller data path offload resource */
@@ -795,10 +981,23 @@ ol_txrx_pdev_detach(ol_txrx_pdev_handle pdev, int force)
     /* Thermal Mitigation */
     adf_os_spinlock_destroy(&pdev->tx_throttle.mutex);
 #endif
+
+    /* TX flow control for peer who is in very bad link status */
+    ol_tx_badpeer_flow_cl_deinit(pdev);
+
     OL_TXRX_PEER_STATS_MUTEX_DESTROY(pdev);
 
     OL_RX_REORDER_TRACE_DETACH(pdev);
     OL_RX_PN_TRACE_DETACH(pdev);
+
+#if defined(CONFIG_HL_SUPPORT) && defined(DEBUG_HL_LOGGING)
+    adf_os_spinlock_destroy(&pdev->txq_log_spinlock);
+#endif
+
+#ifdef DEBUG_HL_LOGGING
+    adf_os_spinlock_destroy(&pdev->grp_stat_spinlock);
+#endif
+
     /*
      * WDI event detach
      */
@@ -846,6 +1045,8 @@ ol_txrx_vdev_attach(
     vdev->safemode = 0;
     vdev->drop_unenc = 1;
     vdev->num_filters = 0;
+    vdev->fwd_tx_packets = 0;
+    vdev->fwd_rx_packets = 0;
 #if defined(CONFIG_PER_VDEV_TX_DESC_POOL)
     adf_os_atomic_init(&vdev->tx_desc_count);
 #endif
@@ -877,12 +1078,19 @@ ol_txrx_vdev_attach(
             vdev->txqs[i].flag = ol_tx_queue_empty;
             /* aggregation is not applicable for vdev tx queues */
             vdev->txqs[i].aggr_state = ol_tx_aggr_disabled;
+            OL_TX_TXQ_SET_GROUP_PTR(&vdev->txqs[i], NULL);
+            ol_txrx_set_txq_peer(&vdev->txqs[i], NULL);
         }
     }
     #endif /* defined(CONFIG_HL_SUPPORT) */
 
     adf_os_spinlock_init(&vdev->ll_pause.mutex);
     vdev->ll_pause.paused_reason = 0;
+    vdev->ll_pause.pause_timestamp = 0;
+#if defined(CONFIG_HL_SUPPORT)
+    vdev->hl_paused_reason = 0;
+#endif
+
     vdev->ll_pause.txq.head = vdev->ll_pause.txq.tail = NULL;
     vdev->ll_pause.txq.depth = 0;
     adf_os_timer_init(
@@ -899,6 +1107,17 @@ ol_txrx_vdev_attach(
     /* Default MAX Q depth for every VDEV */
     vdev->ll_pause.max_q_depth =
         ol_tx_cfg_max_tx_queue_depth_ll(vdev->pdev->ctrl_pdev);
+
+    vdev->bundling_reqired = false;
+    adf_os_spinlock_init(&vdev->bundle_queue.mutex);
+    vdev->bundle_queue.txq.head = vdev->ll_pause.txq.tail = NULL;
+    vdev->bundle_queue.txq.depth = 0;
+    adf_os_timer_init(
+            pdev->osdev,
+            &vdev->bundle_queue.timer,
+            ol_tx_hl_vdev_bundle_timer,
+            vdev, ADF_DEFERRABLE_TIMER);
+
     /* add this vdev into the pdev's list */
     TAILQ_INSERT_TAIL(&pdev->vdev_list, vdev, vdev_list_elem);
 
@@ -925,7 +1144,7 @@ void ol_txrx_osif_vdev_register(ol_txrx_vdev_handle vdev,
     vdev->osif_rx = txrx_ops->rx.std;
 
     if (ol_cfg_is_high_latency(vdev->pdev->ctrl_pdev)) {
-        txrx_ops->tx.std = vdev->tx = ol_tx_hl;
+        txrx_ops->tx.std = vdev->tx = OL_TX_HL;
         txrx_ops->tx.non_std = ol_tx_non_std_hl;
     } else {
         txrx_ops->tx.std = vdev->tx = OL_TX_LL;
@@ -989,13 +1208,14 @@ ol_txrx_vdev_detach(
 
         for (i = 0; i < OL_TX_VDEV_NUM_QUEUES; i++) {
             txq = &vdev->txqs[i];
-            ol_tx_queue_free(pdev, txq, (i + OL_TX_NUM_TIDS));
+            ol_tx_queue_free(pdev, txq, (i + OL_TX_NUM_TIDS), false);
         }
     }
-    #endif /* defined(CONFIG_HL_SUPPORT) */
+#endif /* defined(CONFIG_HL_SUPPORT) */
 
     adf_os_spin_lock_bh(&vdev->ll_pause.mutex);
     adf_os_timer_cancel(&vdev->ll_pause.timer);
+    vdev->ll_pause.is_q_timer_on = FALSE;
     adf_os_timer_free(&vdev->ll_pause.timer);
     while (vdev->ll_pause.txq.head) {
         adf_nbuf_t next = adf_nbuf_next(vdev->ll_pause.txq.head);
@@ -1123,6 +1343,7 @@ ol_txrx_peer_attach(
 
     #if defined(CONFIG_HL_SUPPORT)
     if (ol_cfg_is_high_latency(pdev->ctrl_pdev)) {
+        adf_os_spin_lock_bh(&pdev->tx_queue_spinlock);
         for (i = 0; i < OL_TX_NUM_TIDS; i++) {
             TAILQ_INIT(&peer->txqs[i].head);
             peer->txqs[i].paused_count.total = 0;
@@ -1131,7 +1352,11 @@ ol_txrx_peer_attach(
             peer->txqs[i].ext_tid = i;
             peer->txqs[i].flag = ol_tx_queue_empty;
             peer->txqs[i].aggr_state = ol_tx_aggr_untried;
+            OL_TX_SET_PEER_GROUP_PTR(pdev, peer, vdev->vdev_id, i);
+            ol_txrx_set_txq_peer(&peer->txqs[i], peer);
         }
+        adf_os_spin_unlock_bh(&pdev->tx_queue_spinlock);
+
         /* aggregation is not applicable for mgmt and non-QoS tx queues */
         for (i = OL_TX_NUM_QOS_TIDS; i < OL_TX_NUM_TIDS; i++) {
             peer->txqs[i].aggr_state = ol_tx_aggr_disabled;
@@ -1199,8 +1424,22 @@ ol_txrx_peer_attach(
     #ifdef QCA_SUPPORT_PEER_DATA_RX_RSSI
     peer->rssi_dbm = HTT_RSSI_INVALID;
     #endif
+    if ((VOS_MONITOR_MODE == vos_get_conparam()) && !pdev->self_peer) {
+        pdev->self_peer = peer;
+        /*
+         * No Tx in monitor mode, otherwise results in target assert.
+         * Setting disable_intrabss_fwd to true
+         */
+        ol_vdev_rx_set_intrabss_fwd(vdev, true);
+    }
 
     OL_TXRX_LOCAL_PEER_ID_ALLOC(pdev, peer);
+    peer->reorder_history = adf_os_mem_alloc(NULL,
+            sizeof(struct ol_rx_reorder_history));
+    if (!peer->reorder_history) {
+        TXRX_PRINT(TXRX_PRINT_LEVEL_ERR,
+                 "%s: reorder history malloc failed\n", __func__);
+    }
 
     return peer;
 }
@@ -1498,17 +1737,18 @@ ol_txrx_peer_unref_delete(ol_txrx_peer_handle peer)
         /* check whether the parent vdev has no peers left */
         if (TAILQ_EMPTY(&vdev->peer_list)) {
             /*
-             * Now that there are no references to the peer, we can
-             * release the peer reference lock.
-             */
-            adf_os_spin_unlock_bh(&pdev->peer_ref_mutex);
-            /*
              * Check if the parent vdev was waiting for its peers to be
              * deleted, in order for it to be deleted too.
              */
-            if (vdev->delete.pending) {
+            if (vdev->delete.pending == 1) {
                 ol_txrx_vdev_delete_cb vdev_delete_cb = vdev->delete.callback;
                 void *vdev_delete_context = vdev->delete.context;
+
+                /*
+                 * Now that there are no references to the peer, we can
+                 * release the peer reference lock.
+                 */
+                adf_os_spin_unlock_bh(&pdev->peer_ref_mutex);
 
                 TXRX_PRINT(TXRX_PRINT_LEVEL_INFO1,
                     "%s: deleting vdev object %p "
@@ -1523,6 +1763,8 @@ ol_txrx_peer_unref_delete(ol_txrx_peer_handle peer)
                 if (vdev_delete_cb) {
                     vdev_delete_cb(vdev_delete_context);
                 }
+            } else {
+                adf_os_spin_unlock_bh(&pdev->peer_ref_mutex);
             }
         } else {
             adf_os_spin_unlock_bh(&pdev->peer_ref_mutex);
@@ -1534,7 +1776,7 @@ ol_txrx_peer_unref_delete(ol_txrx_peer_handle peer)
 
             for (i = 0; i < OL_TX_NUM_TIDS; i++) {
                 txq = &peer->txqs[i];
-                ol_tx_queue_free(pdev, txq, i);
+                ol_tx_queue_free(pdev, txq, i, true);
             }
         }
         #endif /* defined(CONFIG_HL_SUPPORT) */
@@ -1657,6 +1899,31 @@ ol_txrx_get_tx_pending(ol_txrx_pdev_handle pdev_handle)
     }
 
     return (total - pdev->tx_desc.num_free);
+}
+
+/*
+ * ol_txrx_get_queue_status() - get vdev tx ll queues status
+ * pdev_handle: pdev handle
+ *
+ * Return: A_OK - if all queues are empty
+ *         A_ERROR - if any queue is not empty
+ */
+A_STATUS
+ol_txrx_get_queue_status(ol_txrx_pdev_handle pdev_handle)
+{
+	struct ol_txrx_pdev_t *pdev = (ol_txrx_pdev_handle)pdev_handle;
+	struct ol_txrx_vdev_t *vdev;
+	A_STATUS status = A_OK;
+
+	TAILQ_FOREACH(vdev, &pdev->vdev_list, vdev_list_elem) {
+		if ((vdev->ll_pause.paused_reason & OL_TXQ_PAUSE_REASON_FW) &&
+			 vdev->ll_pause.txq.depth) {
+			status = A_ERROR;
+			break;
+		}
+	}
+
+	return status;
 }
 
 void
@@ -1997,7 +2264,7 @@ ol_txrx_pdev_display(ol_txrx_pdev_handle pdev, int indent)
     ol_txrx_peer_find_display(pdev, indent+4);
     VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_INFO_LOW,
         "%*stx desc pool: %d elems @ %p\n", indent+4, " ",
-        pdev->tx_desc.pool_size, pdev->tx_desc.array);
+        pdev->tx_desc.pool_size, pdev->tx_desc.desc_pages);
     VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_INFO_LOW, "\n");
     htt_display(pdev->htt_pdev, indent);
 }
@@ -2038,21 +2305,58 @@ ol_txrx_peer_display(ol_txrx_peer_handle peer, int indent)
     }
 }
 #endif /* TXRX_DEBUG_LEVEL */
+/**
+ * ol_txrx_stats() - update ol layter stats
+ * @vdev: pointer to vdev adapter
+ * @buffer: pointer to buffer
+ * @buf_len: length of the buffer
+ * *
+ * to update the stats
+ *
+ * Return: VOS_STATUS
+ */
+VOS_STATUS
+ol_txrx_stats(ol_txrx_vdev_handle vdev, char *buffer, unsigned buf_len)
+{
+	int ret;
+
+	ret = snprintf(buffer, buf_len,
+		"\nTXRX stats:\n"
+		"\nllQueue State : %s"
+		"\n pause %u unpause %u"
+		"\n overflow %u"
+		"\nllQueue timer state : %s\n",
+		((vdev->ll_pause.is_q_paused == FALSE) ? "UNPAUSED" : "PAUSED"),
+		vdev->ll_pause.q_pause_cnt,
+		vdev->ll_pause.q_unpause_cnt,
+		vdev->ll_pause.q_overflow_cnt,
+		((vdev->ll_pause.is_q_timer_on == FALSE)
+			? "NOT-RUNNING" : "RUNNING"));
+	if (ret >= buf_len) {
+		VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_ERROR,
+			"Insufficient buffer:%d, %d", buf_len, ret);
+		return VOS_STATUS_E_NOMEM;
+	}
+	return VOS_STATUS_SUCCESS;
+}
 
 #if TXRX_STATS_LEVEL != TXRX_STATS_LEVEL_OFF
 void
 ol_txrx_stats_display(ol_txrx_pdev_handle pdev)
 {
-    VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_INFO, "txrx stats:\n");
+
+    adf_os_print("TXRX Stats:\n");
     if (TXRX_STATS_LEVEL == TXRX_STATS_LEVEL_BASIC) {
-        VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_INFO,
-            "  tx: %lld msdus (%lld B)\n",
+        adf_os_print(
+            "  tx: %lld msdus (%lld B) rejected %lld (%lld B) \n",
             pdev->stats.pub.tx.delivered.pkts,
-            pdev->stats.pub.tx.delivered.bytes);
+            pdev->stats.pub.tx.delivered.bytes,
+            pdev->stats.pub.tx.dropped.host_reject.pkts,
+            pdev->stats.pub.tx.dropped.host_reject.bytes);
     } else { /* full */
-        VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_INFO,
-            "  tx: sent %lld msdus (%lld B), "
-            "rejected %lld (%lld B), dropped %lld (%lld B)\n",
+        adf_os_print(
+            "  tx: sent %lld msdus (%lld B), rejected %lld (%lld B)\n"
+            "      dropped %lld (%lld B)\n",
             pdev->stats.pub.tx.delivered.pkts,
             pdev->stats.pub.tx.delivered.bytes,
             pdev->stats.pub.tx.dropped.host_reject.pkts,
@@ -2063,7 +2367,7 @@ ol_txrx_stats_display(ol_txrx_pdev_handle pdev)
             pdev->stats.pub.tx.dropped.download_fail.bytes
               + pdev->stats.pub.tx.dropped.target_discard.bytes
               + pdev->stats.pub.tx.dropped.no_ack.bytes);
-        VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_INFO,
+        adf_os_print(
             "    download fail: %lld (%lld B), "
             "target discard: %lld (%lld B), "
             "no ack: %lld (%lld B)\n",
@@ -2073,19 +2377,53 @@ ol_txrx_stats_display(ol_txrx_pdev_handle pdev)
             pdev->stats.pub.tx.dropped.target_discard.bytes,
             pdev->stats.pub.tx.dropped.no_ack.pkts,
             pdev->stats.pub.tx.dropped.no_ack.bytes);
+        adf_os_print(
+            "Tx completion per interrupt:\n"
+            "Single Packet  %d\n"
+            " 2-10 Packets  %d\n"
+            "11-20 Packets  %d\n"
+            "21-30 Packets  %d\n"
+            "31-40 Packets  %d\n"
+            "41-50 Packets  %d\n"
+            "51-60 Packets  %d\n"
+            "  60+ Packets  %d\n",
+            pdev->stats.pub.tx.comp_histogram.pkts_1,
+            pdev->stats.pub.tx.comp_histogram.pkts_2_10,
+            pdev->stats.pub.tx.comp_histogram.pkts_11_20,
+            pdev->stats.pub.tx.comp_histogram.pkts_21_30,
+            pdev->stats.pub.tx.comp_histogram.pkts_31_40,
+            pdev->stats.pub.tx.comp_histogram.pkts_41_50,
+            pdev->stats.pub.tx.comp_histogram.pkts_51_60,
+            pdev->stats.pub.tx.comp_histogram.pkts_61_plus);
     }
-    VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_INFO,
+    adf_os_print(
         "  rx: %lld ppdus, %lld mpdus, %lld msdus, %lld bytes, %lld errs\n",
         pdev->stats.priv.rx.normal.ppdus,
         pdev->stats.priv.rx.normal.mpdus,
         pdev->stats.pub.rx.delivered.pkts,
         pdev->stats.pub.rx.delivered.bytes,
         pdev->stats.priv.rx.err.mpdu_bad);
-    if (TXRX_STATS_LEVEL == TXRX_STATS_LEVEL_FULL) {
-        VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_INFO,
-            "    forwarded %lld msdus, %lld bytes\n",
-            pdev->stats.pub.rx.forwarded.pkts,
-            pdev->stats.pub.rx.forwarded.bytes);
+
+    adf_os_print(
+        "  fwd to stack %d, fwd to fw %d, fwd to stack & fw  %d\n",
+        pdev->stats.pub.rx.intra_bss_fwd.packets_stack,
+        pdev->stats.pub.rx.intra_bss_fwd.packets_fwd,
+        pdev->stats.pub.rx.intra_bss_fwd.packets_stack_n_fwd);
+}
+
+void
+ol_txrx_stats_clear(ol_txrx_pdev_handle pdev)
+{
+    if (TXRX_STATS_LEVEL == TXRX_STATS_LEVEL_BASIC) {
+       pdev->stats.pub.tx.delivered.pkts = 0;
+       pdev->stats.pub.tx.delivered.bytes = 0;
+       pdev->stats.pub.tx.dropped.host_reject.pkts = 0;
+       pdev->stats.pub.tx.dropped.host_reject.bytes = 0;
+       adf_os_mem_zero(&pdev->stats.pub.rx,
+                       sizeof(pdev->stats.pub.rx));
+       adf_os_mem_zero(&pdev->stats.priv.rx, sizeof(pdev->stats.priv.rx));
+    } else { /* Full */
+       adf_os_mem_zero(&pdev->stats, sizeof(pdev->stats));
     }
 }
 
@@ -2154,7 +2492,15 @@ ol_txrx_get_tx_resource(
 )
 {
    adf_os_spin_lock_bh(&vdev->pdev->tx_mutex);
-   if (vdev->pdev->tx_desc.num_free < (u_int16_t)low_watermark) {
+#ifdef CONFIG_PER_VDEV_TX_DESC_POOL
+   if (((ol_tx_desc_pool_size_hl(vdev->pdev->ctrl_pdev) >> 1)
+      - TXRX_HL_TX_FLOW_CTRL_MGMT_RESERVED)
+      - adf_os_atomic_read(&vdev->tx_desc_count)
+      < (u_int16_t)low_watermark)
+#else
+   if (vdev->pdev->tx_desc.num_free < (u_int16_t)low_watermark)
+#endif
+   {
       vdev->tx_fl_lwm = (u_int16_t)low_watermark;
       vdev->tx_fl_hwm = (u_int16_t)(low_watermark + high_watermark_offset);
       /* Not enough free resource, stop TX OS Q */
@@ -2179,6 +2525,131 @@ ol_txrx_ll_set_tx_pause_q_depth(
     return;
 }
 #endif /* QCA_LL_TX_FLOW_CT */
+
+/**
+ * @brief Setter function to store OCB Peer.
+ */
+void ol_txrx_set_ocb_peer(struct ol_txrx_pdev_t *pdev, struct ol_txrx_peer_t *peer)
+{
+    if (pdev == NULL) {
+        return;
+    }
+
+    pdev->ocb_peer = peer;
+    pdev->ocb_peer_valid = (NULL != peer);
+}
+
+/**
+ * @brief Getter function to retrieve OCB peer.
+ * @details
+ *      Returns A_TRUE if ocb_peer is valid
+ *      Otherwise, returns A_FALSE
+ */
+a_bool_t ol_txrx_get_ocb_peer(struct ol_txrx_pdev_t *pdev, struct ol_txrx_peer_t **peer)
+{
+    int rc;
+
+    if ((pdev == NULL) || (peer == NULL)) {
+        rc = A_FALSE;
+        goto exit;
+    }
+
+    if (pdev->ocb_peer_valid) {
+        *peer = pdev->ocb_peer;
+        rc = A_TRUE;
+    } else {
+        rc = A_FALSE;
+    }
+
+exit:
+    return rc;
+}
+
+#define MAX_TID         15
+#define MAX_DATARATE    7
+#define OCB_HEADER_VERSION 1
+
+/**
+ * ol_txrx_set_ocb_def_tx_param() - Set the default OCB TX parameters
+ * @vdev: The OCB vdev that will use these defaults.
+ * @_def_tx_param: The default TX parameters.
+ * @def_tx_param_size: The size of the _def_tx_param buffer.
+ *
+ * Return: true if the default parameters were set correctly, false if there
+ * is an error, for example an invalid parameter. In the case that false is
+ * returned, see the kernel log for the error description.
+ */
+bool ol_txrx_set_ocb_def_tx_param(ol_txrx_vdev_handle vdev,
+	void *_def_tx_param, uint32_t def_tx_param_size)
+{
+	struct ocb_tx_ctrl_hdr_t *def_tx_param =
+		(struct ocb_tx_ctrl_hdr_t *)_def_tx_param;
+
+	if (def_tx_param) {
+		/*
+		 * Default TX parameters are provided.
+		 * Validate the contents and
+		 * save them in the vdev.
+		 */
+		if (def_tx_param_size != sizeof(struct ocb_tx_ctrl_hdr_t)) {
+			VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_ERROR,
+			    "Invalid size of OCB default TX params");
+			return false;
+		}
+
+		if (def_tx_param->version != OCB_HEADER_VERSION) {
+			VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_ERROR,
+				  "Invalid version of OCB default TX params");
+			return false;
+		}
+
+		if (def_tx_param->channel_freq) {
+			int i;
+			for (i = 0; i < vdev->ocb_channel_count; i++) {
+				if (vdev->ocb_channel_info[i].chan_freq ==
+						def_tx_param->channel_freq)
+					break;
+			}
+			if (i == vdev->ocb_channel_count) {
+				VOS_TRACE(VOS_MODULE_ID_TXRX,
+					  VOS_TRACE_LEVEL_ERROR,
+					  "Invalid default channel frequency");
+				return false;
+			}
+		}
+
+		if (def_tx_param->valid_datarate &&
+			    def_tx_param->datarate > MAX_DATARATE) {
+			VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_ERROR,
+				  "Invalid default datarate");
+			return false;
+		}
+
+		if (def_tx_param->valid_tid &&
+			    def_tx_param->ext_tid > MAX_TID) {
+			VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_ERROR,
+				  "Invalid default TID");
+			return false;
+		}
+
+		if (vdev->ocb_def_tx_param == NULL)
+			vdev->ocb_def_tx_param =
+				vos_mem_malloc(sizeof(*vdev->ocb_def_tx_param));
+		vos_mem_copy(vdev->ocb_def_tx_param, def_tx_param,
+			     sizeof(*vdev->ocb_def_tx_param));
+	} else {
+		/*
+		 * Default TX parameters are not provided.
+		 * Delete the old defaults.
+		 */
+		if (vdev->ocb_def_tx_param) {
+			vos_mem_free(vdev->ocb_def_tx_param);
+			vdev->ocb_def_tx_param = NULL;
+		}
+	}
+
+	return true;
+}
 
 #ifdef IPA_UC_OFFLOAD
 void
@@ -2257,4 +2728,104 @@ void ol_txrx_ipa_uc_get_stat(ol_txrx_pdev_handle pdev)
 }
 
 #endif /* IPA_UC_OFFLOAD */
+
+void ol_txrx_display_stats(struct ol_txrx_pdev_t *pdev, uint16_t value)
+{
+
+    switch(value)
+    {
+        case WLAN_TXRX_STATS:
+            ol_txrx_stats_display(pdev);
+            break;
+        case WLAN_TXRX_DESC_STATS:
+            adf_nbuf_tx_desc_count_display();
+            break;
+#ifdef CONFIG_HL_SUPPORT
+        case WLAN_SCHEDULER_STATS:
+            ol_tx_sched_cur_state_display(pdev);
+            ol_tx_sched_stats_display(pdev);
+            break;
+        case WLAN_TX_QUEUE_STATS:
+            ol_tx_queue_log_display(pdev);
+            break;
+#ifdef FEATURE_HL_GROUP_CREDIT_FLOW_CONTROL
+        case WLAN_CREDIT_STATS:
+            OL_TX_DUMP_GROUP_CREDIT_STATS(pdev);
+            break;
+#endif
+
+#ifdef DEBUG_HL_LOGGING
+        case WLAN_BUNDLE_STATS:
+            htt_dump_bundle_stats(pdev->htt_pdev);
+            break;
+#endif
+#endif
+        default:
+            VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_ERROR,
+                     "%s: Unknown value",__func__);
+            break;
+    }
+}
+
+void ol_txrx_clear_stats(struct ol_txrx_pdev_t *pdev, uint16_t value)
+{
+
+    switch(value)
+    {
+        case WLAN_TXRX_STATS:
+            ol_txrx_stats_clear(pdev);
+            break;
+        case WLAN_TXRX_DESC_STATS:
+            adf_nbuf_tx_desc_count_clear();
+            break;
+#ifdef CONFIG_HL_SUPPORT
+        case WLAN_SCHEDULER_STATS:
+            ol_tx_sched_stats_clear(pdev);
+            break;
+        case WLAN_TX_QUEUE_STATS:
+            ol_tx_queue_log_clear(pdev);
+            break;
+#ifdef FEATURE_HL_GROUP_CREDIT_FLOW_CONTROL
+        case WLAN_CREDIT_STATS:
+            OL_TX_CLEAR_GROUP_CREDIT_STATS(pdev);
+            break;
+#endif
+        case WLAN_BUNDLE_STATS:
+            htt_clear_bundle_stats(pdev->htt_pdev);
+            break;
+#endif
+        default:
+            VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_ERROR,
+                                          "%s: Unknown value",__func__);
+            break;
+    }
+}
+
+/*
+ * ol_txrx_get_ll_queue_pause_bitmap() - to obtain ll queue pause bitmap and
+ *                                       last pause timestamp
+ * @vdev_id: vdev id
+ * @pause_bitmap: pointer to return ll queue pause bitmap
+ * @pause_timestamp: pointer to return pause timestamp to calling func.
+ *
+ * Return: status -> A_OK - for success, A_ERROR for failure
+ *
+ */
+A_STATUS ol_txrx_get_ll_queue_pause_bitmap(uint8_t vdev_id,
+	uint8_t *pause_bitmap, adf_os_time_t *pause_timestamp)
+{
+	ol_txrx_vdev_handle vdev = NULL;
+
+	vdev = (ol_txrx_vdev_handle) ol_txrx_get_vdev_from_vdev_id(vdev_id);
+	if (!vdev) {
+		TXRX_PRINT(TXRX_PRINT_LEVEL_ERR,
+			"%s: vdev handle is NULL for vdev id %d",
+			__func__, vdev_id);
+		return A_ERROR;
+	}
+
+	*pause_timestamp = vdev->ll_pause.pause_timestamp;
+	*pause_bitmap = vdev->ll_pause.paused_reason;
+	return A_OK;
+}
 

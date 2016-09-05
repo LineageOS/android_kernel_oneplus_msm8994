@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2002-2014, 2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -105,6 +105,175 @@ dfs_process_pulse_dur(struct ath_dfs *dfs, u_int8_t re_dur)
     */
    /* Convert 0.8us durations to TSF ticks (usecs) */
    return (u_int8_t)dfs_round((int32_t)((dfs->dur_multiplier)*re_dur));
+}
+
+/*
+ * dfs_process_dc_pulse: process dc pulses
+ * @dfs: pointer to dfs structure
+ * @event: dfs event
+ * @retval: current found status
+ * @this_ts: event's ts
+ *
+ * Return: None
+ */
+static void dfs_process_dc_pulse(struct ath_dfs *dfs, struct dfs_event *event,
+                                 int *retval, int this_ts)
+{
+    struct dfs_event re;
+    struct dfs_state *rs=NULL;
+    struct dfs_filtertype *ft;
+    struct dfs_filter *rf;
+    int found, p, empty;
+    int min_pri, miss_pulse_number = 0, deviation = 0;
+    u_int32_t tabledepth = 0;
+    u_int64_t deltaT;
+    int ext_chan_event_flag = 0;
+    int i;
+
+    OS_MEMCPY(&re, event, sizeof(*event));
+    if (re.re_chanindex < DFS_NUM_RADAR_STATES)
+       rs = &dfs->dfs_radar[re.re_chanindex];
+
+    while ((tabledepth < DFS_MAX_RADAR_OVERLAP) &&
+           ((dfs->dfs_dc_radartable[re.re_dur])[tabledepth] != -1) &&
+           (!*retval)) {
+        ft = dfs->dfs_dc_radarf[((dfs->dfs_dc_radartable
+                                             [re.re_dur])[tabledepth])];
+
+        VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                  FL("** RD (%d): ts %x dur %u rssi %u"),
+                  rs->rs_chan.ic_freq,
+                  re.re_ts, re.re_dur, re.re_rssi);
+
+        deltaT = this_ts - ft->ft_last_ts;
+        if (re.re_rssi < ft->ft_rssithresh && re.re_dur > 4) {
+            VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                   FL("Rejecting on rssi rssi=%u thresh=%u depth=%d"),
+                   re.re_rssi, ft->ft_rssithresh,
+                   tabledepth);
+            tabledepth++;
+            dfs_reset_filter_delaylines(ft);
+            ATH_DFSQ_LOCK(dfs);
+            empty = STAILQ_EMPTY(&(dfs->dfs_radarq));
+            ATH_DFSQ_UNLOCK(dfs);
+            continue;
+        }
+        if ((deltaT < ft->ft_minpri) && (deltaT !=0)) {
+            /* This check is for the whole filter type. Individual filters
+             * will check this again. This is first line of filtering. */
+            VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                FL("Rejecting on pri pri=%lld minpri=%u depth=%d"),
+                (unsigned long long)deltaT,
+                ft->ft_minpri, tabledepth);
+            dfs_reset_filter_delaylines(ft);
+            tabledepth++;
+            continue;
+        }
+        for (p = 0, found = 0; (p < ft->ft_numfilters) && (!found); p++) {
+            rf = ft->ft_filters[p];
+            if ((re.re_dur >= rf->rf_mindur) &&
+                (re.re_dur <= rf->rf_maxdur)) {
+                deltaT = (this_ts < rf->rf_dl.dl_last_ts) ?
+                    (int64_t) ((DFS_TSF_WRAP - rf->rf_dl.dl_last_ts) +
+                                this_ts + 1) :
+                    this_ts - rf->rf_dl.dl_last_ts;
+
+                if ((deltaT < rf->rf_minpri) && (deltaT != 0)) {
+                    /* Second line of PRI filtering. */
+                    VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                        FL("filterID=%d :: Rejected and cleared individual filter min PRI deltaT=%lld rf->rf_minpri=%u"),
+                        rf->rf_pulseid,
+                        (unsigned long long)deltaT, rf->rf_minpri);
+                    dfs_reset_delayline(&rf->rf_dl);
+                    rf->rf_dl.dl_last_ts = this_ts;
+                    continue;
+                }
+
+                if (rf->rf_ignore_pri_window > 0) {
+                    if (deltaT < rf->rf_minpri) {
+                        VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                            FL("filterID=%d :: Rejected and cleared on individual filter max PRI deltaT=%lld rf->rf_minpri=%u"),
+                            rf->rf_pulseid,
+                            (unsigned long long)deltaT, rf->rf_minpri);
+                        dfs_reset_delayline(&rf->rf_dl);
+                        rf->rf_dl.dl_last_ts = this_ts;
+                        continue;
+                    }
+                } else {
+                    if (deltaT < rf->rf_minpri) {
+                        VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                           FL("filterID=%d :: Rejected and cleared on individual filter max PRI deltaT=%lld rf->rf_minpri=%u"),
+                           rf->rf_pulseid,
+                           (unsigned long long)deltaT, rf->rf_minpri);
+                        dfs_reset_delayline(&rf->rf_dl);
+                        rf->rf_dl.dl_last_ts = this_ts;
+                        continue;
+                    }
+                }
+                dfs_add_pulse(dfs, rf, &re, deltaT, this_ts);
+
+                /* extra WAR */
+                if ((dfs->dfsdomain == DFS_FCC_DOMAIN &&
+                    dfs->dfsdomain == DFS_MKK4_DOMAIN) &&
+                    ((rf->rf_pulseid != 31) && (rf->rf_pulseid != 32))) {
+
+                    min_pri = 0xffff;
+                    for (i = 0; i < rf->rf_dl.dl_numelems; i++) {
+                        if (rf->rf_dl.dl_elems[i].de_time  < min_pri)
+                            min_pri = rf->rf_dl.dl_elems[i].de_time;
+                    }
+
+                    for (i=0; i < rf->rf_dl.dl_numelems; i++) {
+                        miss_pulse_number = vos_round_div(
+                               (rf->rf_dl.dl_elems[i].de_time), min_pri);
+                        deviation = __adf_os_abs(min_pri *
+                                        miss_pulse_number -
+                                        rf->rf_dl.dl_elems[i].de_time);
+                        if (deviation > miss_pulse_number*3) {
+                            dfs_reset_delayline(&rf->rf_dl);
+                            VOS_TRACE(VOS_MODULE_ID_SAP,
+                                VOS_TRACE_LEVEL_INFO,
+                                FL("filterID=%d :: cleared individual deleyline min_pri =%d miss_pulse_number =%d deviation =%d"),
+                                rf->rf_pulseid,
+                                min_pri, miss_pulse_number, deviation);
+                        }
+                    }
+                }
+
+                /* If this is an extension channel event,
+                 * flag it for false alarm reduction */
+                if (re.re_chanindex == dfs->dfs_extchan_radindex)
+                    ext_chan_event_flag = 1;
+
+                if (rf->rf_patterntype == 2)
+                    found = dfs_staggered_check(dfs, rf, (uint32_t)deltaT,
+                                                re.re_dur);
+                else
+                    found = dfs_bin_check(dfs, rf, (uint32_t) deltaT,
+                                          re.re_dur, ext_chan_event_flag);
+
+                if (dfs->dfs_debug_mask & ATH_DEBUG_DFS2)
+                    dfs_print_delayline(dfs, &rf->rf_dl);
+
+                rf->rf_dl.dl_last_ts = this_ts;
+            } else {
+                /* if we are rejecting this, clear the queue */
+                dfs_reset_delayline(&rf->rf_dl);
+                VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                    FL("filterID= %d :: cleared individual deleyline"),
+                    rf->rf_pulseid);
+            }
+        }
+        ft->ft_last_ts = this_ts;
+        *retval |= found;
+        if (found) {
+            VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                FL(":## Radar Found minDur=%d, filterId=%d ##"),
+                ft->ft_mindur,
+                rf != NULL ? rf->rf_pulseid : -1);
+        }
+        tabledepth++;
+    }
 }
 
 /*
@@ -381,9 +550,11 @@ dfs_process_radarevent(struct ath_dfs *dfs, struct ieee80211_channel *chan)
                         dfs->radar_log[i].dur     = re.re_dur;
                         dfs->dfs_event_log_count++;
                 }
-                VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO, "%s[%d]:xxxxx ts =%u re.re_dur=%u re.re_rssi =%u diff =%u pl->pl_lastelem.p_time=%llu xxxxx",__func__,__LINE__,(u_int32_t)this_ts, re.re_dur, re.re_rssi, diff_ts, (unsigned long long)pl->pl_elems[index].p_time);
-
-
+                VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                    "%s[%d]:xxxxx ts =%u re.re_dur=%u re.re_rssi =%u diff =%u sidx = %u flags = %x pl->pl_lastelem.p_time=%llu xxxxx",
+                    __func__, __LINE__, (u_int32_t)this_ts,
+                    re.re_dur, re.re_rssi, diff_ts, re.sidx, re.re_flags,
+                    (unsigned long long)pl->pl_elems[index].p_time);
 
                 /* If diff_ts is very small, we might be getting false pulse detects
                  * due to heavy interference. We might be getting spectral splatter
@@ -419,6 +590,76 @@ dfs_process_radarevent(struct ath_dfs *dfs, struct ieee80211_channel *chan)
             empty = STAILQ_EMPTY(&(dfs->dfs_radarq));
             ATH_DFSQ_UNLOCK(dfs);
             continue;
+         }
+
+         /*
+          * Modifying the pulse duration for FCC Type 4
+          * or JAPAN W56 Type 6 radar pulses when the
+          * following condition is reported in radar
+          * summary report.
+          */
+         if ((DFS_FCC_DOMAIN == dfs->dfsdomain ||
+              DFS_MKK4_DOMAIN == dfs->dfsdomain) &&
+             ((chan->ic_flags & IEEE80211_CHAN_VHT80) ==
+              IEEE80211_CHAN_VHT80) &&
+             (chan->ic_pri_freq_center_freq_mhz_separation ==
+                                DFS_WAR_PLUS_30_MHZ_SEPARATION ||
+              chan->ic_pri_freq_center_freq_mhz_separation ==
+                                DFS_WAR_MINUS_30_MHZ_SEPARATION) &&
+             (re.sidx == DFS_WAR_PEAK_INDEX_ZERO) &&
+             (re.re_dur > DFS_TYPE4_WAR_PULSE_DURATION_LOWER_LIMIT &&
+              re.re_dur < DFS_TYPE4_WAR_PULSE_DURATION_UPPER_LIMIT) &&
+             (diff_ts > DFS_TYPE4_WAR_PRI_LOWER_LIMIT &&
+              diff_ts < DFS_TYPE4_WAR_PRI_UPPER_LIMIT)) {
+             VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                       "\n%s:chan->ic_flags=0x%x, Pri Chan MHz Separation=%d\n",
+                       __func__, chan->ic_flags,
+                       chan->ic_pri_freq_center_freq_mhz_separation);
+
+             VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                "\n%s: Reported Peak Index = %d,re.re_dur = %d,diff_ts = %d\n",
+                 __func__, re.sidx, re.re_dur, diff_ts);
+
+             VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                "\n%s: Modifying the pulse duration to fit the valid range \n",
+                 __func__);
+
+             re.re_dur = DFS_TYPE4_WAR_VALID_PULSE_DURATION;
+         }
+
+         /*
+          * Modifying the pulse duration for ETSI Type 2
+          * and ETSI type 3 radar pulses when the following
+          * condition is reported in radar summary report.
+          */
+         if ((DFS_ETSI_DOMAIN == dfs->dfsdomain) &&
+             ((chan->ic_flags & IEEE80211_CHAN_VHT80) ==
+              IEEE80211_CHAN_VHT80) &&
+             (chan->ic_pri_freq_center_freq_mhz_separation ==
+                                DFS_WAR_PLUS_30_MHZ_SEPARATION ||
+              chan->ic_pri_freq_center_freq_mhz_separation ==
+                                DFS_WAR_MINUS_30_MHZ_SEPARATION) &&
+             (re.sidx == DFS_WAR_PEAK_INDEX_ZERO) &&
+             (re.re_dur > DFS_ETSI_TYPE2_TYPE3_WAR_PULSE_DUR_LOWER_LIMIT &&
+              re.re_dur < DFS_ETSI_TYPE2_TYPE3_WAR_PULSE_DUR_UPPER_LIMIT) &&
+             ((diff_ts > DFS_ETSI_TYPE2_WAR_PRI_LOWER_LIMIT &&
+               diff_ts < DFS_ETSI_TYPE2_WAR_PRI_UPPER_LIMIT) ||
+              (diff_ts > DFS_ETSI_TYPE3_WAR_PRI_LOWER_LIMIT &&
+               diff_ts < DFS_ETSI_TYPE3_WAR_PRI_UPPER_LIMIT ))) {
+             VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                       "\n%s:chan->ic_flags=0x%x, Pri Chan MHz Separation=%d\n",
+                       __func__, chan->ic_flags,
+                       chan->ic_pri_freq_center_freq_mhz_separation);
+
+             VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                "\n%s: Reported Peak Index = %d,re.re_dur = %d,diff_ts = %d\n",
+                 __func__, re.sidx, re.re_dur, diff_ts);
+
+             VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                "\n%s: Modifying the ETSI pulse dur to fit the valid range \n",
+                 __func__);
+
+             re.re_dur  = DFS_ETSI_WAR_VALID_PULSE_DURATION;
          }
 
       /* BIN5 pulses are FCC and Japan specific */
@@ -457,7 +698,26 @@ dfs_process_radarevent(struct ath_dfs *dfs, struct ieee80211_channel *chan)
       DFS_DPRINTK(dfs, ATH_DEBUG_DFS1,"  *** chan freq (%d): ts %llu dur %u rssi %u",
          rs->rs_chan.ic_freq, (unsigned long long)this_ts, re.re_dur, re.re_rssi);
 
-      while ((tabledepth < DFS_MAX_RADAR_OVERLAP) &&
+
+      /*
+       * DC pulses processing will be done in this seperate block since some
+       * device may generate pulse which may cause false detection.
+       * This processing is similar kind as of normal pulse processing with
+       * some exception such as:
+       * 1. Clear the queue if pulse doesn't belong to it
+       * 2. Remove chan load optimization(can cause some valid pulses to drop)
+       * 3. Drop pulses on basis of mean deviation for some filters
+       */
+      if (((re.sidx == 0) && DFS_EVENT_NOTCHIRP(&re)) &&
+              ((dfs->dfsdomain == DFS_FCC_DOMAIN) ||
+               (dfs->dfsdomain == DFS_MKK4_DOMAIN) ||
+               (dfs->dfsdomain == DFS_ETSI_DOMAIN && re.re_dur < 18))) {
+          dfs_process_dc_pulse(dfs, &re, &retval, this_ts);
+      }
+
+      /* Pulse not at DC position */
+      else {
+        while ((tabledepth < DFS_MAX_RADAR_OVERLAP) &&
              ((dfs->dfs_radartable[re.re_dur])[tabledepth] != -1) &&
              (!retval)) {
          ft = dfs->dfs_radarf[((dfs->dfs_radartable[re.re_dur])[tabledepth])];
@@ -485,7 +745,7 @@ dfs_process_radarevent(struct ath_dfs *dfs, struct ieee80211_channel *chan)
             continue;
          }
          for (p=0, found = 0; (p<ft->ft_numfilters) && (!found); p++) {
-                                    rf = &(ft->ft_filters[p]);
+                                    rf = ft->ft_filters[p];
                                     if ((re.re_dur >= rf->rf_mindur) && (re.re_dur <= rf->rf_maxdur)) {
                                         /* The above check is probably not necessary */
                                         deltaT = (this_ts < rf->rf_dl.dl_last_ts) ?
@@ -521,7 +781,7 @@ dfs_process_radarevent(struct ath_dfs *dfs, struct ieee80211_channel *chan)
                                             This is normally 2 but can be higher for W53.
                                         */
 
-                                        if ( (deltaT > (dfs->dfs_pri_multiplier * rf->rf_maxpri) ) || (deltaT < rf->rf_minpri) ) {
+                                        if ( (deltaT > ((u_int64_t)dfs->dfs_pri_multiplier * rf->rf_maxpri) ) || (deltaT < rf->rf_minpri) ) {
                                                 DFS_DPRINTK(dfs, ATH_DEBUG_DFS2,
                                                 "filterID %d : Rejecting on individual filter max PRI deltaT=%lld rf->rf_minpri=%u",
                                                 rf->rf_pulseid, (unsigned long long)deltaT, rf->rf_minpri);
@@ -561,6 +821,7 @@ VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO, "%s[%d]:filterID= %d :: Rejec
                  rf != NULL ? rf->rf_pulseid : -1);
          }
          tabledepth++;
+        }
       }
       ATH_DFSQ_LOCK(dfs);
       empty = STAILQ_EMPTY(&(dfs->dfs_radarq));

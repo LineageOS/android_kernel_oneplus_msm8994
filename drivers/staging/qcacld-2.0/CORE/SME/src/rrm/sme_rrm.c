@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2014, 2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -60,7 +60,8 @@
 #endif
 
 /* Roam score for a neighbor AP will be calculated based on the below definitions.
-    The calculated roam score will be used to select the roamable candidate from neighbor AP list */
+    The calculated roam score will be used to select the roam able
+    candidate from neighbor AP list */
 #define RRM_ROAM_SCORE_NEIGHBOR_REPORT_REACHABILITY             0   /* When we support 11r over the DS, this should have a non-zero value */
 #define RRM_ROAM_SCORE_NEIGHBOR_REPORT_SECURITY                 10
 #define RRM_ROAM_SCORE_NEIGHBOR_REPORT_KEY_SCOPE                20
@@ -179,7 +180,7 @@ static eHalStatus sme_RrmSendBeaconReportXmitInd( tpAniSirGlobal pMac,
 {
    tpSirBssDescription pBssDesc = NULL;
    tpSirBeaconReportXmitInd pBeaconRep;
-   tANI_U16 length, ie_len;
+   tANI_U16 length, ie_len, tot_len;
    tANI_U8 bssCounter=0, msgCounter=0;
    tCsrScanResultInfo *pCurResult=NULL;
    eHalStatus status = eHAL_STATUS_FAILURE;
@@ -226,10 +227,13 @@ static eHalStatus sme_RrmSendBeaconReportXmitInd( tpAniSirGlobal pMac,
            if(pBssDesc != NULL)
            {
                ie_len = GET_IE_LEN_IN_BSS( pBssDesc->length );
-               pBeaconRep->pBssDescription[msgCounter] = vos_mem_malloc (
-                                            ie_len+sizeof(tSirBssDescription));
+               tot_len = ie_len+sizeof(tSirBssDescription);
+               pBeaconRep->pBssDescription[msgCounter] =
+                                      vos_mem_malloc(tot_len);
                if (NULL == pBeaconRep->pBssDescription[msgCounter])
                    break;
+               vos_mem_zero(pBeaconRep->pBssDescription[msgCounter],
+                                                             tot_len);
                vos_mem_copy( pBeaconRep->pBssDescription[msgCounter],
                              pBssDesc,
                              sizeof(tSirBssDescription) );
@@ -468,6 +472,7 @@ static eHalStatus sme_RrmSendScanResult( tpAniSirGlobal pMac,
    tANI_U8 counter=0;
    tpRrmSMEContext pSmeRrmContext = &pMac->rrm.rrmSmeContext;
    tANI_U32 sessionId;
+   tCsrRoamInfo *roam_info;
 
 #if defined WLAN_VOWIFI_DEBUG
    smsLog( pMac, LOGE, "Send scan result to PE ");
@@ -530,19 +535,24 @@ static eHalStatus sme_RrmSendScanResult( tpAniSirGlobal pMac,
 #endif
    }
 
+   smsLog(pMac, LOG1, FL("RRM Measurement Done %d"), measurementDone);
    if (NULL == pResult)
    {
-      // no scan results
-      //
-      // Spec. doesnt say anything about such condition.
-      // Since section 7.4.6.2 (IEEE802.11k-2008) says-rrm report frame should contain
-      // one or more report IEs. It probably means dont send any respose if no matching
-      // BSS found. Moreover, there is no flag or field in measurement report IE(7.3.2.22)
-      // OR beacon report IE(7.3.2.22.6) that can be set to indicate no BSS found on a given channel.
-      //
-      // If we finished measurement on all the channels, we still need to
-      // send a xmit indication with moreToFollow set to MEASURMENT_DONE
-      // so that PE can clean any context allocated.
+      /*
+       * no scan results
+       *
+       * Spec. doesnt say anything about such condition.
+       * Since section 7.4.6.2 (IEEE802.11k-2008) says-rrm report frame should
+       * contain one or more report IEs. It probably means dont send any
+       * response if no matching BSS found. Moreover, there is no flag or
+       * field in measurement report IE(7.3.2.22) OR beacon report
+       * IE(7.3.2.22.6) that can be set to indicate no BSS found on a
+       * given channel.
+       *
+       * If we finished measurement on all the channels, we still need to
+       * send a xmit indication with moreToFollow set to MEASURMENT_DONE
+       * so that PE can clean any context allocated.
+       */
       if( measurementDone )
       {
 #if defined(FEATURE_WLAN_ESE_UPLOAD)
@@ -585,35 +595,53 @@ static eHalStatus sme_RrmSendScanResult( tpAniSirGlobal pMac,
    while (pScanResult)
    {
       pNextResult = sme_ScanResultGetNext(pMac, pResult);
+      smsLog(pMac, LOG1, "Scan res timer:%lu, rrm scan timer:%lu",
+             pScanResult->timer, RRM_scan_timer);
       if(pScanResult->timer >= RRM_scan_timer)
       {
+          roam_info = vos_mem_malloc(sizeof(*roam_info));
+          if (NULL == roam_info) {
+              smsLog( pMac, LOGP, FL("vos_mem_malloc failed:") );
+              status =  eHAL_STATUS_FAILED_ALLOC;
+              goto rrm_send_scan_results_done;
+          }
+          vos_mem_zero(roam_info, sizeof(*roam_info));
+          roam_info->pBssDesc = &pScanResult->BssDescriptor;
+          csrRoamCallCallback(pMac, sessionId, roam_info, 0,
+                           eCSR_ROAM_UPDATE_SCAN_RESULT, eCSR_ROAM_RESULT_NONE);
+          vos_mem_free(roam_info);
           pScanResultsArr[counter++] = pScanResult;
       }
       pScanResult = pNextResult; //sme_ScanResultGetNext(hHal, pResult);
       if (counter >= SIR_BCN_REPORT_MAX_BSS_DESC)
          break;
-      }
-
-   if (counter)
-   {
-          smsLog(pMac, LOG1, " Number of BSS Desc with RRM Scan %d ", counter);
-#if defined(FEATURE_WLAN_ESE_UPLOAD)
-         if (eRRM_MSG_SOURCE_ESE_UPLOAD == pSmeRrmContext->msgSource)
-         {
-             status = sme_EseSendBeaconReqScanResults(pMac,
-                                                sessionId,
-                                                chanList[0],
-                                                pScanResultsArr,
-                                                measurementDone,
-                                                counter);
-         }
-         else
-#endif /*FEATURE_WLAN_ESE_UPLOAD*/
-             status = sme_RrmSendBeaconReportXmitInd( pMac,
-                                                pScanResultsArr,
-                                                measurementDone,
-                                                counter);
    }
+
+   smsLog(pMac, LOG1, " Number of BSS Desc with RRM Scan %d ", counter);
+   /*
+    * The beacon report should be sent whether the counter is zero or non-zero.
+    * There might be a few scan results in the cache but not actually are a
+    * result of this scan. During that scenario, the counter will be zero.
+    * The report should be sent and LIM will further cleanup the RRM to
+    * accept the further incoming requests
+    * In case the counter is Zero, the pScanResultsArr will be NULL.
+    * The next level routine does a check for the measurementDone to determine
+    * whether to send a report or not.
+    */
+   if (counter || measurementDone) {
+#if defined(FEATURE_WLAN_ESE_UPLOAD)
+        if (eRRM_MSG_SOURCE_ESE_UPLOAD == pSmeRrmContext->msgSource)
+            status = sme_EseSendBeaconReqScanResults(pMac, sessionId,
+                                    chanList[0], pScanResultsArr,
+                                    measurementDone, counter);
+   else
+#endif
+            status = sme_RrmSendBeaconReportXmitInd(pMac,
+                                    pScanResultsArr,
+                                    measurementDone, counter);
+   }
+
+rrm_send_scan_results_done:
    sme_ScanResultPurge(pMac, pResult);
 
    return status;
@@ -659,8 +687,9 @@ static eHalStatus sme_RrmScanRequestCallback(tHalHandle halHandle,
       sme_RrmSendScanResult( pMac, 1, &pSmeRrmContext->channelList.ChannelList[pSmeRrmContext->currentIndex], false );
 
       pSmeRrmContext->currentIndex++; //Advance the current index.
-      //start the timer to issue next request.
-      //From timer tick get a random number within 10ms and max randmization interval.
+
+      /* Start the timer to issue next request. From timer tick get a random
+       number within 10ms and max randomization interval. */
       time_tick = vos_timer_get_system_ticks();
       interval = time_tick % (pSmeRrmContext->randnIntvl - 10 + 1) + 10;
 
@@ -706,6 +735,7 @@ eHalStatus sme_RrmIssueScanReq( tpAniSirGlobal pMac )
    tpRrmSMEContext pSmeRrmContext = &pMac->rrm.rrmSmeContext;
    tANI_U32 sessionId;
    tSirScanType scanType;
+   v_TIME_t current_time;
 
    status = csrRoamGetSessionIdFromBSSID( pMac, (tCsrBssid*)pSmeRrmContext->sessionBssId, &sessionId );
    if( status != eHAL_STATUS_SUCCESS )
@@ -732,7 +762,6 @@ eHalStatus sme_RrmIssueScanReq( tpAniSirGlobal pMac )
        vos_mem_zero( &scanRequest, sizeof(scanRequest));
 
        /* set scanType, active or passive */
-       scanRequest.bcnRptReqScan = TRUE;
        scanRequest.scanType = scanType;
 
        vos_mem_copy(scanRequest.bssid,
@@ -765,6 +794,25 @@ eHalStatus sme_RrmIssueScanReq( tpAniSirGlobal pMac )
 
        smsLog( pMac, LOG1, "Scan Type(%d) Max Dwell Time(%d)", scanRequest.scanType,
                   scanRequest.maxChnTime );
+      /**
+       * For RRM scans timing is very important especially when the request
+       * is for limited channels. There is no need for firmware to rest for
+       * about 100-200 ms on the home channel. Instead, it can start the
+       * scan right away which will make the host to respond with the beacon
+       * report as quickly as possible. Ensure that the scan requests are
+       * not back to back and hence there is a check to see if the requests
+       * are atleast 1 second apart.
+       */
+       current_time = vos_timer_get_system_time();
+       smsLog(pMac, LOG1, "prev scan triggered before %ld ms, totalchannels %d",
+              current_time - RRM_scan_timer,
+              pSmeRrmContext->channelList.numOfChannels);
+       if ((abs(current_time - RRM_scan_timer) > 1000) &&
+               (pSmeRrmContext->channelList.numOfChannels == 1)) {
+            scanRequest.restTime = 1;
+            scanRequest.min_rest_time = 1;
+            scanRequest.idle_time = 1;
+       }
 
        RRM_scan_timer = vos_timer_get_system_time();
 
@@ -937,7 +985,7 @@ eHalStatus sme_RrmProcessBeaconReportReqInd(tpAniSirGlobal pMac, void *pMsgBuf)
 
    pSmeRrmContext->token = pBeaconReq->uDialogToken;
    pSmeRrmContext->regClass = pBeaconReq->channelInfo.regulatoryClass;
-   pSmeRrmContext->randnIntvl = VOS_MAX( pBeaconReq->randomizationInterval, pSmeRrmContext->rrmConfig.maxRandnInterval );
+   pSmeRrmContext->randnIntvl = VOS_MAX(pBeaconReq->randomizationInterval, pSmeRrmContext->rrmConfig.max_randn_interval);
    pSmeRrmContext->currentIndex = 0;
    pSmeRrmContext->msgSource = pBeaconReq->msgSource;
    vos_mem_copy((tANI_U8*)&pSmeRrmContext->measMode, (tANI_U8*)&pBeaconReq->fMeasurementtype, SIR_ESE_MAX_MEAS_IE_REQS);
@@ -1180,11 +1228,11 @@ eHalStatus sme_RrmProcessNeighborReport(tpAniSirGlobal pMac, void *pMsgBuf)
    tpRrmNeighborReportDesc  pNeighborReportDesc;
    tANI_U8 i = 0;
    VOS_STATUS vosStatus = VOS_STATUS_SUCCESS;
-   tANI_U8 sessionId;
+   tANI_U32 sessionId;
 
    /* Get the session id */
    status = csrRoamGetSessionIdFromBSSID(pMac, (tCsrBssid *)pNeighborRpt->bssId,
-                                        (tANI_U32*) &sessionId);
+                                         &sessionId);
    if (HAL_STATUS_SUCCESS(status)) {
 #ifdef FEATURE_WLAN_ESE
        /* Clear the cache for ESE. */
@@ -1298,10 +1346,8 @@ eHalStatus sme_RrmMsgProcessor( tpAniSirGlobal pMac,  v_U16_t msg_type,
 
     \fn rrmIterMeasTimerHandle
 
-    \brief  Timer handler to handlet the timeout condition when a specific BT
-
+    \brief  Timer handler to handle the timeout condition when a specific BT
             stop event does not come back, in which case to restore back the
-
             heartbeat timer.
 
     \param  pMac - The handle returned by macOpen.
@@ -1368,7 +1414,7 @@ VOS_STATUS rrmOpen (tpAniSirGlobal pMac)
    tpRrmSMEContext pSmeRrmContext = &pMac->rrm.rrmSmeContext;
    eHalStatus   halStatus = eHAL_STATUS_SUCCESS;
 
-   pSmeRrmContext->rrmConfig.maxRandnInterval = 50; //ms
+   pSmeRrmContext->rrmConfig.max_randn_interval = 50; //ms
 
    vosStatus = vos_timer_init( &pSmeRrmContext->IterMeasTimer,
 
@@ -1511,11 +1557,13 @@ VOS_STATUS rrmReady (tpAniSirGlobal pMac)
     \return VOS_STATUS
 
   ---------------------------------------------------------------------------*/
-VOS_STATUS rrmChangeDefaultConfigParam(tpAniSirGlobal pMac, tpRrmConfigParam pRrmConfig)
+VOS_STATUS rrmChangeDefaultConfigParam(tpAniSirGlobal pMac,
+				       struct rrm_config_param *pRrmConfig)
 {
-   vos_mem_copy( &pMac->rrm.rrmSmeContext.rrmConfig, pRrmConfig, sizeof( tRrmConfigParam ) );
+	vos_mem_copy(&pMac->rrm.rrmSmeContext.rrmConfig, pRrmConfig,
+		     sizeof(struct rrm_config_param));
 
-   return VOS_STATUS_SUCCESS;
+	return VOS_STATUS_SUCCESS;
 }
 
 /* ---------------------------------------------------------------------------

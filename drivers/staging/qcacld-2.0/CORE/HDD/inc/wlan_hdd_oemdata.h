@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014, 2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -27,6 +27,8 @@
 
 #ifdef FEATURE_OEM_DATA_SUPPORT
 
+#include "wlan_hdd_main.h"
+
 /**===========================================================================
 
   \file  wlan_hdd_oemdata.h
@@ -38,14 +40,6 @@
 
 #ifndef __WLAN_HDD_OEM_DATA_H__
 #define __WLAN_HDD_OEM_DATA_H__
-
-#ifndef OEM_DATA_REQ_SIZE
-#define OEM_DATA_REQ_SIZE 280
-#endif
-
-#ifndef OEM_DATA_RSP_SIZE
-#define OEM_DATA_RSP_SIZE 1724
-#endif
 
 #define OEM_APP_SIGNATURE_LEN      16
 #define OEM_APP_SIGNATURE_STR      "QUALCOMM-OEM-APP"
@@ -158,28 +152,32 @@ typedef PACKED_PRE struct PACKED_POST
     tHddChannelInfo peer_chan_info;
 } tPeerStatusInfo;
 
-struct iw_oem_data_req
-{
-    v_U8_t                  oemDataReq[OEM_DATA_REQ_SIZE];
+/**
+ * enum oem_capability_mask - mask field for userspace client capabilities
+ * @OEM_CAP_RM_FTMRR: FTM range report mask bit
+ * @OEM_CAP_RM_LCI: LCI capability mask bit
+ */
+enum oem_capability_mask {
+	OEM_CAP_RM_FTMRR = (1 << (0)),
+	OEM_CAP_RM_LCI = (1 << (1)),
 };
 
-int iw_set_oem_data_req(
-        struct net_device *dev,
-        struct iw_request_info *info,
-        union iwreq_data *wrqu,
-        char *extra);
-
-int iw_get_oem_data_rsp(
-        struct net_device *dev,
-        struct iw_request_info *info,
-        union iwreq_data *wrqu,
-        char *extra);
-
-struct iw_oem_data_rsp
-{
-    tANI_U8           oemDataRsp[OEM_DATA_RSP_SIZE];
+/**
+ * struct oem_get_capability_rsp - capabilites set by userspace and target.
+ * @target_cap: target capabilities
+ * @client_capabilities: capabilities set by userspace via set request
+ */
+struct oem_get_capability_rsp {
+	t_iw_oem_data_cap target_cap;
+	struct sme_oem_capability cap;
 };
 
+void hdd_SendPeerStatusIndToOemApp(v_MACADDR_t *peerMac,
+	uint8_t peerStatus,
+	uint8_t peerTimingMeasCap,
+	uint8_t sessionId,
+	tSirSmeChanInfo *chan_info,
+	device_mode_t dev_mode);
 #endif //__WLAN_HDD_OEM_DATA_H__
 
 #endif //FEATURE_OEM_DATA_SUPPORT

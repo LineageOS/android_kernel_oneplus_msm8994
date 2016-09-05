@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -95,19 +95,14 @@ when           who        what, where, why
 #define SAP_DEBUG
 // Used to enable or disable security on the BT-AMP link
 #define WLANSAP_SECURITY_ENABLED_STATE VOS_TRUE
-#ifdef WLAN_FEATURE_MBSSID
-// When MBSSID feature is enabled, SAP context is directly passed to SAP APIs
 #define VOS_GET_SAP_CB(ctx) (ptSapContext)(ctx)
-#else
-// How do I get SAP context from voss context?
-#define VOS_GET_SAP_CB(ctx) vos_get_context( VOS_MODULE_ID_SAP, ctx)
-#endif
 
 #define VOS_GET_HAL_CB(ctx) vos_get_context( VOS_MODULE_ID_PE, ctx)
 //MAC Address length
 #define ANI_EAPOL_KEY_RSN_NONCE_SIZE      32
 
 #define IS_ETSI_WEATHER_CH(_ch)   ((_ch >= 120) && (_ch <= 130))
+#define IS_CH_BONDING_WITH_WEATHER_CH(_ch)   (_ch == 116)
 #define IS_CHAN_JAPAN_W53(_ch)    ((_ch >= 52)  && (_ch <= 64))
 #define IS_CHAN_JAPAN_INDOOR(_ch) ((_ch >= 36)  && (_ch <= 64))
 #define IS_CHAN_JAPAN_OUTDOOR(_ch)((_ch >= 100) && (_ch <= 140))
@@ -140,7 +135,8 @@ typedef enum {
     eSAP_DFS_CAC_WAIT,
     eSAP_STARTING,
     eSAP_STARTED,
-    eSAP_DISCONNECTING
+    eSAP_DISCONNECTING,
+    eSAP_DISCONNECTPENDING
 } eSapFsmStates_t;
 
 /*----------------------------------------------------------------------------
@@ -159,12 +155,31 @@ typedef struct sSapAcsChannelInfo {
     v_U32_t             weight;
 }tSapAcsChannelInfo;
 
+#ifdef FEATURE_AP_MCC_CH_AVOIDANCE
+/*
+ * In a setup having two MDM both operating in AP+AP MCC scenario
+ * if both the AP decides to use same or close channel set, CTS to
+ * self, mechanism is causing issues with connectivity. For this, its
+ * proposed that 2nd MDM devices which comes up later should detect
+ * presence of first MDM device via special Q2Q IE present in becon
+ * and avoid those channels mentioned in IE.
+ *
+ * Following struct will keep this info in sapCtx struct, and will be used
+ * to avoid such channels in Random Channel Select in case of radar ind.
+ */
+struct sap_avoid_channels_info {
+	bool       present;
+	uint8_t    channels[WNI_CFG_VALID_CHANNEL_LIST_LEN];
+};
+#endif /* FEATURE_AP_MCC_CH_AVOIDANCE */
+
 typedef struct sSapContext {
 
     vos_lock_t          SapGlobalLock;
 
     // Include the current channel of AP
     v_U32_t             channel;
+    v_U32_t             secondary_ch;
 
     // Include the SME(CSR) sessionId here
     v_U8_t              sessionId;
@@ -223,10 +238,17 @@ typedef struct sSapContext {
     tSirAPWPSIEs      APWPSIEs;
     tSirRSNie         APWPARSNIEs;
 
+#ifdef FEATURE_WLAN_WAPI
+    v_U32_t           nStaWAPIReqIeLength;
+    v_U8_t            pStaWapiReqIE[MAX_ASSOC_IND_IE_LEN];
+#endif
+
     v_U32_t           nStaAddIeLength;
     v_U8_t            pStaAddIE[MAX_ASSOC_IND_IE_LEN];
     v_U8_t            *channelList;
     tSapChannelListInfo SapChnlList;
+    uint16_t           vht_channel_width;
+    uint16_t           ch_width_orig;
 
     // session to scan
     tANI_BOOLEAN        isScanSessionOpen;
@@ -246,34 +268,45 @@ typedef struct sSapContext {
     v_U16_t            acsBandSwitchThreshold;
     tSapAcsChannelInfo acsBestChannelInfo;
     tANI_BOOLEAN       enableOverLapCh;
-    v_BOOL_t           apAutoChannelSelection;
-    v_U8_t             apStartChannelNum;
-    v_U8_t             apEndChannelNum;
+
+    struct sap_acs_cfg *acs_cfg;
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
     v_U8_t             cc_switch_mode;
 #endif
-#ifdef FEATURE_WLAN_AP_AP_ACS_OPTIMIZE
-    v_U8_t          skip_acs_scan_status;
-    v_U8_t          skip_acs_scan_range1_stch;
-    v_U8_t          skip_acs_scan_range1_endch;
-    v_U8_t          skip_acs_scan_range2_stch;
-    v_U8_t          skip_acs_scan_range2_endch;
-#endif
 
-#if defined(FEATURE_WLAN_STA_AP_MODE_DFS_DISABLE) ||\
-    defined(WLAN_FEATURE_MBSSID)
+#if defined(FEATURE_WLAN_STA_AP_MODE_DFS_DISABLE)
     v_BOOL_t           dfs_ch_disable;
 #endif
     tANI_BOOLEAN       isCacEndNotified;
     tANI_BOOLEAN       isCacStartNotified;
+    tANI_BOOLEAN       is_sap_ready_for_chnl_chng;
+
+#ifdef FEATURE_AP_MCC_CH_AVOIDANCE
+    /*
+     * In a setup having two MDM both operating in AP+AP MCC scenario
+     * if both the AP decides to use same or close channel set, CTS to
+     * self, mechanism is causing issues with connectivity. For this, its
+     * proposed that 2nd MDM devices which comes up later should detect
+     * presence of first MDM device via special Q2Q IE present in becon
+     * and avoid those channels mentioned in IE.
+     *
+     * this struct contains the list of channels on which another MDM AP
+     * in MCC mode were detected.
+     */
+    struct sap_avoid_channels_info sap_detected_avoid_ch_ie;
+#endif /* FEATURE_AP_MCC_CH_AVOIDANCE */
+    enum sap_acs_dfs_mode  dfs_mode;
+
+    uint16_t beacon_tx_rate;
+    tSirMacRateSet supp_rate_set;
+    tSirMacRateSet extended_rate_set;
+    vos_event_t sap_session_opened_evt;
 } *ptSapContext;
 
 
 /*----------------------------------------------------------------------------
  *  External declarations for global context
  * -------------------------------------------------------------------------*/
-//  The main per-Physical Link (per WLAN association) context.
-extern ptSapContext  gpSapCtx;
 
 /*----------------------------------------------------------------------------
  *  SAP state machine event definition
@@ -319,6 +352,43 @@ typedef struct sWLAN_SAPEvent {
 ============================================================================*/
 eHalStatus
 WLANSAP_ScanCallback
+(
+  tHalHandle halHandle,
+  void *pContext,
+  v_U8_t sessionId,
+  v_U32_t scanID,
+  eCsrScanStatus scanStatus
+);
+
+/*==========================================================================
+
+  FUNCTION    WLANSAP_PreStartBssAcsScanCallback()
+
+  DESCRIPTION
+    Callback for Scan (scan results) Events
+
+  DEPENDENCIES
+    NA.
+
+  PARAMETERS
+
+    IN
+    tHalHandle:  the tHalHandle passed in with the scan request
+    *p2: the second context pass in for the caller, opaque sap Handle here
+    scanID:
+    sessionId: Session identifier
+    status: Status of scan -success, failure or abort
+
+  RETURN VALUE
+    The eHalStatus code associated with performing the operation
+
+    eHAL_STATUS_SUCCESS:  Success
+
+  SIDE EFFECTS
+
+============================================================================*/
+eHalStatus
+WLANSAP_PreStartBssAcsScanCallback
 (
   tHalHandle halHandle,
   void *pContext,
@@ -536,6 +606,38 @@ sapFsm
 (
     ptSapContext sapContext,    /* sapContext value */
     ptWLAN_SAPEvent sapEvent   /* State machine event */
+);
+
+/*==========================================================================
+  FUNCTION    sapGotoChannelSel
+
+  DESCRIPTION
+    Function for initiating scan request for SME
+
+  DEPENDENCIES
+    NA.
+
+  PARAMETERS
+
+    IN
+    sapContext  : Sap Context value
+    sapEvent    : State machine event/ NULL if no FSM event is required.
+    sapDoAcsPreStartBss: VOS_TRUE, if ACS scan is issued pre start BSS.
+                         VOS_FALSE, if ACS scan is issued post start BSS.
+
+  RETURN VALUE
+    The VOS_STATUS code associated with performing the operation
+
+    VOS_STATUS_SUCCESS: Success
+
+  SIDE EFFECTS
+============================================================================*/
+VOS_STATUS
+sapGotoChannelSel
+(
+    ptSapContext sapContext,
+    ptWLAN_SAPEvent sapEvent,
+    v_BOOL_t sapDoAcsPreStartBss
 );
 
 /*==========================================================================
@@ -809,12 +911,12 @@ sap_ReleaseGlobalLock( ptSapContext  pSapCtx );
 	PARAMETERS
 
 	IN
-	NULL
+	Pointer to sap context
 
 	RETURN VALUE
 	NULL
 ============================================================================*/
-void sapUpdateUnsafeChannelList(void);
+void sapUpdateUnsafeChannelList(ptSapContext pSapCtx);
 #endif /* FEATURE_WLAN_CH_AVOID */
 
 /*---------------------------------------------------------------------------
@@ -929,19 +1031,6 @@ v_BOOL_t is_concurrent_sap_ready_for_channel_change(tHalHandle hHal,
  *
  */
 v_U8_t sap_get_total_number_sap_intf(tHalHandle hHal);
-/*---------------------------------------------------------------------------
-FUNCTION  sapFetchRegulatoryDomain
-
-DESCRIPTION Fetches the Regulatory domain based up on the coutry code.
-
-DEPENDENCIES PARAMETERS
-IN hHAL : HAL pointer
-
-RETURN VALUE  : v_REGDOMAIN_t, returns the regulatory domain
-
-SIDE EFFECTS
----------------------------------------------------------------------------*/
-v_REGDOMAIN_t sapFetchRegulatoryDomain(tHalHandle hHal);
 
 /*---------------------------------------------------------------------------
 FUNCTION  sapDfsIsW53Invalid
@@ -979,6 +1068,32 @@ SIDE EFFECTS
 ---------------------------------------------------------------------------*/
 v_BOOL_t sapDfsIsChannelInPreferredLocation(tHalHandle hHal, v_U8_t channelID);
 
+void sap_config_acs_result(tHalHandle hal, ptSapContext sap_ctx,
+                                                             uint32_t sec_ch);
+
+#ifdef FEATURE_AP_MCC_CH_AVOIDANCE
+/**
+ * sap_check_in_avoid_ch_list() - checks if given channel present is channel
+ * avoidance list
+ * avoid_channels_info struct
+ * @sap_ctx:        sap context.
+ * @channel:        channel to be checked in sap_ctx's avoid ch list
+ *
+ * sap_ctx contains sap_avoid_ch_info strcut containing the list of channels on
+ * which MDM device's AP with MCC was detected. This function checks if given
+ * channel is present in that list.
+ *
+ * Return: true, if channel was present, false othersie.
+ */
+bool sap_check_in_avoid_ch_list(ptSapContext sap_ctx, uint8_t channel);
+#endif
+
+eHalStatus sap_OpenSession(tHalHandle hHal, ptSapContext sapContext,
+                            uint32_t *session_id);
+eHalStatus sap_CloseSession(tHalHandle hHal,
+                            ptSapContext sapContext,
+                            csrRoamSessionCloseCallback callback,
+                            v_BOOL_t valid);
 #ifdef __cplusplus
 }
 #endif

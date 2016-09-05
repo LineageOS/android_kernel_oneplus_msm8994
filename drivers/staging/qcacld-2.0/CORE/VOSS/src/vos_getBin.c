@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -154,8 +154,7 @@ v_BOOL_t vos_concurrent_open_sessions_running(void)
     return (j>1);
 }
 
-#ifdef WLAN_FEATURE_MBSSID
-v_BOOL_t vos_concurrent_sap_sessions_running(v_VOID_t)
+v_BOOL_t vos_concurrent_beaconing_sessions_running(v_VOID_t)
 {
     v_U8_t i=0;
     hdd_context_t *pHddCtx;
@@ -166,13 +165,14 @@ v_BOOL_t vos_concurrent_sap_sessions_running(v_VOID_t)
        pHddCtx = vos_get_context( VOS_MODULE_ID_HDD, pVosContext);
        if (NULL != pHddCtx)
        {
-             i = pHddCtx->no_of_open_sessions[VOS_STA_SAP_MODE];
+             i = pHddCtx->no_of_open_sessions[VOS_STA_SAP_MODE] +
+                 pHddCtx->no_of_open_sessions[VOS_P2P_GO_MODE] +
+                 pHddCtx->no_of_open_sessions[VOS_IBSS_MODE];
        }
     }
 
     return (i>1);
 }
-#endif
 
 
 /**---------------------------------------------------------------------------

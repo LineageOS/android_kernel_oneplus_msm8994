@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -203,7 +203,9 @@ ap_beacon_process(
                   //then we need to enable protection from 11g station.
                   //we don't need protection from 11b because if that's needed then our operating
                   //mode would have already been set to legacy in the previous blocks.
-                  if(eSIR_HT_OP_MODE_OVERLAP_LEGACY == pBcnStruct->HTInfo.opMode)
+                  if((eSIR_HT_OP_MODE_OVERLAP_LEGACY ==
+                                  pBcnStruct->HTInfo.opMode) &&
+                       !pMac->roam.configParam.ignore_peer_ht_opmode)
                   {
                       if((eSIR_HT_OP_MODE_MIXED != pMac->lim.gHTOperMode) &&
                           (eSIR_HT_OP_MODE_OVERLAP_LEGACY != pMac->lim.gHTOperMode))
@@ -278,9 +280,12 @@ static void __schBeaconProcessNoSession(tpAniSirGlobal pMac, tpSchBeaconStruct p
         limHandleIBSScoalescing(pMac, pBeacon, pRxPacketInfo, psessionEntry);
     }
 
-    //If station(STA/BT-STA/BT-AP/IBSS) mode, Always save the beacon in the scan results, if atleast one session is active
-    //schBeaconProcessNoSession will be called only when there is atleast one session active, so not checking
-    //it again here.
+    /*
+     * If station(STA/BT-STA/BT-AP/IBSS) mode, Always save the beacon in the
+     * scan results, if at-least one session is active schBeaconProcessNoSession
+     * will be called only when there is at-least one session active,
+     * so not checking it again here.
+     */
     limCheckAndAddBssDescription(pMac, pBeacon, pRxPacketInfo, eANI_BOOLEAN_FALSE, eANI_BOOLEAN_FALSE);
     return;
 }
@@ -297,11 +302,11 @@ static void __schBeaconProcessNoSession(tpAniSirGlobal pMac, tpSchBeaconStruct p
  *
  * LOGIC:
  *        Following scenarios exist when Session exists
- *             * IBSS STA receving beacons from IBSS Peers, who are part of IBSS.
+ *             * IBSS STA receiving beacons from IBSS Peers, who are part of IBSS.
  *                 - call limHandleIBSScoalescing with that session context.
- *             * Infra STA receving beacons from AP to which it is connected
+ *             * Infra STA receiving beacons from AP to which it is connected
  *                 - call schBeaconProcessFromAP with that session's context.
- *             * BTAMP STA receving beacons from BTAMP AP
+ *             * BTAMP STA receiving beacons from BTAMP AP
  *                 - call schBeaconProcessFromAP with that session's context.
  *             * BTAMP AP receiving beacons from BTAMP STA
  *               (here need to make sure BTAP creates session entry for BT STA)
@@ -343,25 +348,31 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
     tANI_U8  operMode;
     tANI_U8  chWidth = 0;
     tANI_U8  skip_opmode_update = false;
+    WLAN_PHY_MODE chanMode;
+    ePhyChanBondState chanOffset;
 #endif
 #if defined FEATURE_WLAN_ESE || defined WLAN_FEATURE_VOWIFI
      tPowerdBm regMax = 0,maxTxPower = 0;
 #endif
+    tANI_U8  cbMode;
+    tPowerdBm  localPowerConstraint;
 
     vos_mem_zero(&beaconParams, sizeof(tUpdateBeaconParams));
     beaconParams.paramChangeBitmap = 0;
 
-    if(eLIM_STA_IN_IBSS_ROLE == psessionEntry->limSystemRole )
-    {
+    if (RF_CHAN_14 >= psessionEntry->currentOperChannel)
+        cbMode = pMac->roam.configParam.channelBondingMode24GHz;
+    else
+        cbMode = pMac->roam.configParam.channelBondingMode5GHz;
+
+    if (LIM_IS_IBSS_ROLE(psessionEntry)) {
         limHandleIBSScoalescing(pMac, pBeacon,  pRxPacketInfo, psessionEntry);
-    }
-    else if(  (eLIM_STA_ROLE == psessionEntry->limSystemRole) ||
-                  (eLIM_BT_AMP_STA_ROLE == psessionEntry->limSystemRole))
-    {
+    } else if (LIM_IS_STA_ROLE(psessionEntry) ||
+               LIM_IS_BT_AMP_STA_ROLE(psessionEntry)) {
         /*
         *  This handles two cases:
-        *  -- Infra STA receving beacons from AP
-        *  -- BTAMP_STA receving beacons from BTAMP_AP
+        *  -- Infra STA receiving beacons from AP
+        *  -- BTAMP_STA receiving beacons from BTAMP_AP
         */
         //Always save the beacon into LIM's cached scan results
         limCheckAndAddBssDescription(pMac, pBeacon, pRxPacketInfo, eANI_BOOLEAN_FALSE, eANI_BOOLEAN_FALSE);
@@ -377,6 +388,7 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
                           psessionEntry->currentOperChannel, pBeacon->channelNumber);)
            goto fail;
         }
+
         limDetectChangeInApCapabilities(pMac, pBeacon, psessionEntry);
         if(limGetStaHashBssidx(pMac, DPH_STA_HASH_INDEX_PEER, &bssIdx, psessionEntry) != eSIR_SUCCESS)
             goto fail;
@@ -443,10 +455,8 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
                     // If needed, downgrade the EDCA parameters
                     limSetActiveEdcaParams(pMac, psessionEntry->gLimEdcaParams, psessionEntry);
 
-                    if (pStaDs->aniPeer == eANI_BOOLEAN_TRUE)
-                        limSendEdcaParams(pMac, psessionEntry->gLimEdcaParamsActive, pStaDs->bssId, eANI_BOOLEAN_TRUE);
-                    else
-                        limSendEdcaParams(pMac, psessionEntry->gLimEdcaParamsActive, pStaDs->bssId, eANI_BOOLEAN_FALSE);
+                    limSendEdcaParams(pMac, psessionEntry->gLimEdcaParamsActive,
+                                      pStaDs->bssId);
                 }
                 else
                     PELOGE(schLog(pMac, LOGE, FL("Self Entry missing in Hash Table"));)
@@ -457,36 +467,56 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
             sendProbeReq = TRUE;
     }
 
-    if ( psessionEntry->htCapability && pBeacon->HTInfo.present )
+    if (psessionEntry->htCapability && pBeacon->HTInfo.present &&
+                                 (!LIM_IS_IBSS_ROLE(psessionEntry)))
     {
         limUpdateStaRunTimeHTSwitchChnlParams( pMac, &pBeacon->HTInfo, bssIdx,psessionEntry);
     }
 
-    if ( (psessionEntry->limSystemRole == eLIM_STA_ROLE) ||(psessionEntry->limSystemRole == eLIM_BT_AMP_STA_ROLE) ||
-          (psessionEntry->limSystemRole == eLIM_STA_IN_IBSS_ROLE) )
-    {
+    if (LIM_IS_STA_ROLE(psessionEntry) ||
+        LIM_IS_BT_AMP_STA_ROLE(psessionEntry) ||
+        LIM_IS_IBSS_ROLE(psessionEntry)) {
         /* Channel Switch information element updated */
-        if(pBeacon->channelSwitchPresent ||
-            pBeacon->propIEinfo.propChannelSwitchPresent)
-        {
+        if (pBeacon->channelSwitchPresent) {
+#ifdef FEATURE_WLAN_TDLS
+            /*
+             * on receiving channel switch announcement from AP, delete all
+             * TDLS peers before leaving BSS and proceed for channel switch
+             */
+            if (LIM_IS_STA_ROLE(psessionEntry))
+                limDeleteTDLSPeers(pMac, psessionEntry);
+#endif
             limUpdateChannelSwitch(pMac, pBeacon, psessionEntry);
-        }
-        else if (psessionEntry->gLimSpecMgmt.dot11hChanSwState == eLIM_11H_CHANSW_RUNNING)
-        {
+        } else if (psessionEntry->gLimSpecMgmt.dot11hChanSwState ==
+                                       eLIM_11H_CHANSW_RUNNING) {
             limCancelDot11hChannelSwitch(pMac, psessionEntry);
         }
     }
 
 #ifdef WLAN_FEATURE_11AC
-    if ((psessionEntry->limSystemRole == eLIM_STA_ROLE) ||
-        (psessionEntry->limSystemRole == eLIM_BT_AMP_STA_ROLE) ||
-        (psessionEntry->limSystemRole == eLIM_STA_IN_IBSS_ROLE))
-    {
+    if (LIM_IS_STA_ROLE(psessionEntry) ||
+        LIM_IS_BT_AMP_STA_ROLE(psessionEntry) ||
+        LIM_IS_IBSS_ROLE(psessionEntry)) {
        // check for VHT capability
        pStaDs = dphLookupHashEntry(pMac, pMh->sa, &aid,
              &psessionEntry->dph.dphHashTable);
-       if (NULL != pStaDs)
+       if (NULL != pStaDs && (HAL_STA_INVALID_IDX != pStaDs->staIndex ) &&
+            (WNI_CFG_CHANNEL_BONDING_MODE_DISABLE != cbMode))
        {
+          if (pBeacon->HTInfo.present && pBeacon->VHTOperation.present) {
+              chanOffset = limGet11ACPhyCBState(pMac,
+                              pBeacon->channelNumber,
+                              pBeacon->HTInfo.secondaryChannelOffset,
+                              pBeacon->VHTOperation.chanCenterFreqSeg1,
+                              psessionEntry);
+              chanMode = wma_chan_to_mode(pBeacon->channelNumber,
+                              chanOffset,
+                              psessionEntry->vhtCapability,
+                              psessionEntry->dot11mode);
+          } else {
+              chanMode = MODE_MAX;
+          }
+
           if (psessionEntry->vhtCapability && pBeacon->OperatingMode.present )
           {
              operMode = pStaDs->vhtSupportedChannelWidthSet ?
@@ -551,7 +581,7 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
                       chWidth = eHT_CHANNEL_WIDTH_20MHZ;
                    }
                 limCheckVHTOpModeChange(pMac, psessionEntry,
-                      chWidth,
+                      chWidth, chanMode,
                       pStaDs->staIndex, pMh->sa);
              }
              /* Update Nss setting */
@@ -626,7 +656,8 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
                     }
                 }
                 limCheckVHTOpModeChange(pMac, psessionEntry,
-                        chWidth, pStaDs->staIndex, pMh->sa);
+                        chWidth, chanMode, pStaDs->staIndex, pMh->sa);
+
              }
           }
        }
@@ -638,43 +669,42 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
     regMax = cfgGetRegulatoryMaxTransmitPower( pMac, psessionEntry->currentOperChannel );
 #endif
 
-#if defined WLAN_FEATURE_VOWIFI
-    {
-        tPowerdBm  localRRMConstraint = 0;
-        if ( pMac->rrm.rrmPEContext.rrmEnable && pBeacon->powerConstraintPresent )
-        {
-            localRRMConstraint = pBeacon->localPowerConstraint.localPowerConstraints;
+    localPowerConstraint = regMax;
+
+    if (pMac->roam.configParam.allow_tpc_from_ap) {
+#if defined FEATURE_WLAN_ESE
+        if (pBeacon->eseTxPwr.present) {
+            localPowerConstraint = pBeacon->eseTxPwr.power_limit;
+            schLog(pMac, LOG1, "ESE localPowerConstraint = %d,",
+                    localPowerConstraint);
         }
-        else
-        {
-            localRRMConstraint = 0;
-        }
-        maxTxPower = limGetMaxTxPower(regMax, regMax - localRRMConstraint,
-                                      pMac->roam.configParam.nTxPowerCap);
-    }
-#elif defined FEATURE_WLAN_ESE
-    maxTxPower = regMax;
 #endif
 
-#if defined FEATURE_WLAN_ESE
-    if( psessionEntry->isESEconnection )
-    {
-        tPowerdBm  localESEConstraint = 0;
-        if (pBeacon->eseTxPwr.present)
-        {
-            localESEConstraint = pBeacon->eseTxPwr.power_limit;
-            maxTxPower = limGetMaxTxPower(maxTxPower, localESEConstraint, pMac->roam.configParam.nTxPowerCap);
+#if defined WLAN_FEATURE_VOWIFI
+        if (pMac->rrm.rrmPEContext.rrmEnable &&
+                pBeacon->powerConstraintPresent) {
+            localPowerConstraint = regMax;
+            localPowerConstraint -= pBeacon->localPowerConstraint.
+                                                localPowerConstraints;
+            schLog(pMac, LOG1, "localPowerConstraint = %d,",
+                    localPowerConstraint);
         }
-        schLog( pMac, LOG1, "RegMax = %d, localEseCons = %d, MaxTx = %d", regMax, localESEConstraint, maxTxPower );
-    }
 #endif
+    }
+
+    maxTxPower = limGetMaxTxPower(regMax, localPowerConstraint,
+                                   pMac->roam.configParam.nTxPowerCap);
+
+    schLog(pMac, LOG1, "RegMax = %d, MaxTx pwr = %d",
+            regMax, maxTxPower);
 
 #if defined (FEATURE_WLAN_ESE) || defined (WLAN_FEATURE_VOWIFI)
     {
         //If maxTxPower is increased or decreased
         if( maxTxPower != psessionEntry->maxTxPower )
         {
-             schLog( pMac, LOG1, "Local power constraint change..updating new maxTx power %d to HAL",maxTxPower);
+             schLog(pMac, LOG1, "Local power constraint change..updating new maxTx power %d to HAL from old pwr %d",
+                     maxTxPower, psessionEntry->maxTxPower);
              if( limSendSetMaxTxPowerReq ( pMac, maxTxPower, psessionEntry ) == eSIR_SUCCESS )
                    psessionEntry->maxTxPower = maxTxPower;
         }
@@ -710,19 +740,11 @@ fail:
 
 
 /**
- * schBeaconProcess
+ * schBeaconProcess() - process the received beacon frame
+ * @pMac:        mac global context
+ * @pRxPacketInfo:  pointer to buffer descriptor
  *
- * FUNCTION:
- * Process the received beacon frame
- *
- * LOGIC:
-  *
- * ASSUMPTIONS:
- *
- * NOTE:
- *
- * @param pRxPacketInfo pointer to buffer descriptor
- * @return None
+ * Return: none
  */
 
 void schBeaconProcess(tpAniSirGlobal pMac, tANI_U8* pRxPacketInfo, tpPESession psessionEntry)
@@ -730,9 +752,7 @@ void schBeaconProcess(tpAniSirGlobal pMac, tANI_U8* pRxPacketInfo, tpPESession p
     static tSchBeaconStruct beaconStruct;
     tUpdateBeaconParams beaconParams;
     tpPESession pAPSession = NULL;
-#ifdef WLAN_FEATURE_MBSSID
     tANI_U8 i;
-#endif
 
     vos_mem_zero(&beaconParams, sizeof(tUpdateBeaconParams));
     beaconParams.paramChangeBitmap = 0;
@@ -744,6 +764,10 @@ void schBeaconProcess(tpAniSirGlobal pMac, tANI_U8* pRxPacketInfo, tpPESession p
     {
         PELOGE(schLog(pMac, LOGE, FL("beacon parsing failed"));)
         pMac->sch.gSchBcnParseErrorCnt++;
+        if ((NULL != psessionEntry) &&
+           (!psessionEntry->currentBssBeaconCnt))
+             lim_parse_beacon_for_tim(pMac,
+                 pRxPacketInfo, psessionEntry);
         return;
     }
 
@@ -764,7 +788,6 @@ void schBeaconProcess(tpAniSirGlobal pMac, tANI_U8* pRxPacketInfo, tpPESession p
     *
     */
 
-#ifdef WLAN_FEATURE_MBSSID
 
     for (i =0; i < pMac->lim.maxBssId; i++)
     {
@@ -774,8 +797,7 @@ void schBeaconProcess(tpAniSirGlobal pMac, tANI_U8* pRxPacketInfo, tpPESession p
 #endif
     )
         {
-            if (eLIM_AP_ROLE != pAPSession->limSystemRole)
-            {
+            if (!LIM_IS_AP_ROLE(pAPSession)) {
                 continue;
             }
 
@@ -800,31 +822,6 @@ void schBeaconProcess(tpAniSirGlobal pMac, tANI_U8* pRxPacketInfo, tpPESession p
             }
         }
     }
-
-#else
-
-    if (((pAPSession = limIsApSessionActive(pMac)) != NULL)
-#ifdef WLAN_FEATURE_ROAM_SCAN_OFFLOAD
-          && (!(WDA_GET_OFFLOADSCANLEARN(pRxPacketInfo)))
-#endif
-    )
-    {
-        beaconParams.bssIdx = pAPSession->bssIdx;
-        if (pAPSession->gLimProtectionControl != WNI_CFG_FORCE_POLICY_PROTECTION_DISABLE)
-            ap_beacon_process(pMac,  pRxPacketInfo, &beaconStruct, &beaconParams, pAPSession);
-
-        if ((VOS_FALSE == pMac->sap.SapDfsInfo.is_dfs_cac_timer_running)
-            && beaconParams.paramChangeBitmap)
-        {
-            //Update the beacons and apply the new settings to HAL
-            schSetFixedBeaconFields(pMac, pAPSession);
-            PELOG1(schLog(pMac, LOG1, FL("Beacon for PE session[%d] got changed.  "), pAPSession->peSessionId);)
-            PELOG1(schLog(pMac, LOG1, FL("sending beacon param change bitmap: 0x%x "), beaconParams.paramChangeBitmap);)
-            limSendBeaconParams(pMac, &beaconParams, pAPSession);
-        }
-    }
-
-#endif
 
     /*
     * Now process the beacon in the context of the BSS which is transmitting the beacons, if one is found
@@ -868,14 +865,43 @@ tSirRetStatus schBeaconEdcaProcess(tpAniSirGlobal pMac, tSirMacEdcaParamSetIE *e
     vos_log_qos_edca_pkt_type *log_ptr = NULL;
 #endif //FEATURE_WLAN_DIAG_SUPPORT
 
-    PELOG1(schLog(pMac, LOG1, FL("Updating parameter set count: Old %d ---> new %d"),
-           psessionEntry->gLimEdcaParamSetCount, edca->qosInfo.count);)
+    schLog(pMac, LOG2, FL("Updating parameter set count: Old %d ---> new %d"),
+           psessionEntry->gLimEdcaParamSetCount, edca->qosInfo.count);
 
     psessionEntry->gLimEdcaParamSetCount = edca->qosInfo.count;
     psessionEntry->gLimEdcaParams[EDCA_AC_BE] = edca->acbe;
     psessionEntry->gLimEdcaParams[EDCA_AC_BK] = edca->acbk;
     psessionEntry->gLimEdcaParams[EDCA_AC_VI] = edca->acvi;
     psessionEntry->gLimEdcaParams[EDCA_AC_VO] = edca->acvo;
+
+    if (pMac->roam.configParam.enable_edca_params) {
+        psessionEntry->gLimEdcaParams[EDCA_AC_VO].aci.aifsn =
+               pMac->roam.configParam.edca_vo_aifs;
+        psessionEntry->gLimEdcaParams[EDCA_AC_VI].aci.aifsn =
+               pMac->roam.configParam.edca_vi_aifs;
+        psessionEntry->gLimEdcaParams[EDCA_AC_BK].aci.aifsn =
+               pMac->roam.configParam.edca_bk_aifs;
+        psessionEntry->gLimEdcaParams[EDCA_AC_BE].aci.aifsn =
+               pMac->roam.configParam.edca_be_aifs;
+
+        psessionEntry->gLimEdcaParams[EDCA_AC_VO].cw.min =
+               pMac->roam.configParam.edca_vo_cwmin;
+        psessionEntry->gLimEdcaParams[EDCA_AC_VI].cw.min =
+               pMac->roam.configParam.edca_vi_cwmin;
+        psessionEntry->gLimEdcaParams[EDCA_AC_BK].cw.min =
+               pMac->roam.configParam.edca_bk_cwmin;
+        psessionEntry->gLimEdcaParams[EDCA_AC_BE].cw.min =
+               pMac->roam.configParam.edca_be_cwmin;
+
+        psessionEntry->gLimEdcaParams[EDCA_AC_VO].cw.max =
+               pMac->roam.configParam.edca_vo_cwmax;
+        psessionEntry->gLimEdcaParams[EDCA_AC_VI].cw.max =
+               pMac->roam.configParam.edca_vi_cwmax;
+        psessionEntry->gLimEdcaParams[EDCA_AC_BK].cw.max =
+               pMac->roam.configParam.edca_bk_cwmax;
+        psessionEntry->gLimEdcaParams[EDCA_AC_BE].cw.max =
+               pMac->roam.configParam.edca_be_cwmax;
+    }
 #ifdef FEATURE_WLAN_DIAG_SUPPORT
     WLAN_VOS_DIAG_LOG_ALLOC(log_ptr, vos_log_qos_edca_pkt_type, LOG_WLAN_QOS_EDCA_C);
     if(log_ptr)
@@ -899,16 +925,18 @@ tSirRetStatus schBeaconEdcaProcess(tpAniSirGlobal pMac, tSirMacEdcaParamSetIE *e
     }
     WLAN_VOS_DIAG_LOG_REPORT(log_ptr);
 #endif //FEATURE_WLAN_DIAG_SUPPORT
-    PELOG1(schLog(pMac, LOGE, FL("Updating Local EDCA Params(gLimEdcaParams) to: "));)
-    for(i=0; i<MAX_NUM_AC; i++)
+    schLog(pMac, LOG1,
+           FL("Edsa param enabled in ini %d. Updating Local EDCA Params(gLimEdcaParams) to: "),
+           pMac->roam.configParam.enable_edca_params);
+    for (i = 0; i < MAX_NUM_AC; i++)
     {
-        PELOG1(schLog(pMac, LOG1, FL("AC[%d]:  AIFSN: %d, ACM %d, CWmin %d, CWmax %d, TxOp %d"),
+        schLog(pMac, LOG1, FL("AC[%d]:  AIFSN: %d, ACM %d, CWmin %d, CWmax %d, TxOp %d"),
             i,
             psessionEntry->gLimEdcaParams[i].aci.aifsn,
             psessionEntry->gLimEdcaParams[i].aci.acm,
             psessionEntry->gLimEdcaParams[i].cw.min,
             psessionEntry->gLimEdcaParams[i].cw.max,
-            psessionEntry->gLimEdcaParams[i].txoplimit);)
+            psessionEntry->gLimEdcaParams[i].txoplimit);
     }
 
     return eSIR_SUCCESS;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -35,10 +35,6 @@
 
 * Description: Power Management Control (PMC) API definitions.
 
-
-
-
-
 *
 
 ******************************************************************************/
@@ -48,14 +44,24 @@
 
 #define __PMC_API_H__
 
-//This timer value determines the default periodicity at which BMPS retries will happen
-//This default value is overwritten typicaly by OS specific registry/INI values.
+/*
+ * This timer value determines the default periodicity at which BMPS retries
+ * will happen; this default value is overwritten typically by OS specific
+ * registry/INI values.
+ */
 #define BMPS_TRAFFIC_TIMER_DEFAULT 5000  //unit = ms
 #define DHCP_REMAIN_POWER_ACTIVE_THRESHOLD 12 // (12 * 5) sec = 60 seconds = 1 min
 
 //This timer value is used when starting the timer right after association. This value
 //should be large enough to allow the auth, DHCP handshake to complete
 #define BMPS_TRAFFIC_TIMER_ALLOW_SECURITY_DHCP 8000  //unit = ms
+
+/*
+ * This timer value is used to start the timer right after key completion
+ * during roaming. This should be small enough to allow STA to enter PS
+ * immediately after key completion as no DHCP phase during roaming.
+ */
+#define TRAFFIC_TIMER_ROAMING 100
 
 #define PMC_IS_CHIP_ACCESSIBLE(pmcState) ( (IMPS != (pmcState)) && (REQUEST_IMPS != (pmcState)) && \
        (STANDBY != (pmcState)) && (REQUEST_STANDBY != (pmcState)) )
@@ -203,7 +209,7 @@ typedef enum ePmcBeaconsToForward
 
 
 
-/* The Spatial Mulitplexing Power Save modes. */
+/* The Spatial Multiplexing Power Save modes. */
 
 typedef enum ePmcSmpsMode
 
@@ -281,7 +287,7 @@ typedef struct sPmcBmpsConfigParams
 
 
 
-/* Configuration parameters for Spatial Mulitplexing Power Save (SMPS). */
+/* Configuration parameters for Spatial Multiplexing Power Save (SMPS). */
 
 typedef struct sPmcSmpsConfigParams
 
@@ -430,7 +436,7 @@ extern eHalStatus pmcSetHostOffload (tHalHandle hHal, tpSirHostOffloadReq pReque
     \param  hHal - The handle returned by macOpen.
     \param  pRequest - Pointer to the Keep Alive.
     \return eHalStatus
-            eHAL_STATUS_FAILURE  Cannot set the keepalive.
+            eHAL_STATUS_FAILURE  Cannot set the keep alive.
             eHAL_STATUS_SUCCESS  Request accepted.
   ---------------------------------------------------------------------------*/
 extern eHalStatus pmcSetKeepAlive (tHalHandle hHal, tpSirKeepAliveReq pRequest, tANI_U8 sessionId);
@@ -445,7 +451,6 @@ extern tANI_BOOLEAN pmcAllowImps( tHalHandle hHal );
 typedef void(*preferredNetworkFoundIndCallback)(void *callbackContext, tpSirPrefNetworkFoundInd pPrefNetworkFoundInd);
 
 extern eHalStatus pmcSetPreferredNetworkList(tHalHandle hHal, tpSirPNOScanReq pRequest, tANI_U8 sessionId, preferredNetworkFoundIndCallback callbackRoutine, void *callbackContext);
-extern eHalStatus pmcSetRssiFilter(tHalHandle hHal, v_U8_t rssiThreshold);
 #endif // FEATURE_WLAN_SCAN_PNO
 
 #ifdef WLAN_FEATURE_PACKET_FILTERING
@@ -494,7 +499,7 @@ typedef enum eUapsdStatus
     PMC_UAPSD_ENABLE_PENDING
 }tUapsdStatus;
 
-/* Powersave Check Routine */
+/* Power save Check Routine */
 typedef tANI_BOOLEAN (*PwrSaveCheckRoutine)(void *checkContext,
                                             tANI_U32 sessionId);
 
@@ -551,7 +556,9 @@ eHalStatus PmcOffloadEnableStaModePowerSave(tHalHandle hHal,
                                             tANI_U32 sessionId);
 
 eHalStatus PmcOffloadDisableStaModePowerSave(tHalHandle hHal,
-                                             tANI_U32 sessionId);
+					     FullPowerReqCb callback_routine,
+					     void *callback_context,
+					     tANI_U32 sessionId);
 
 eHalStatus pmcOffloadRequestFullPower(tHalHandle hHal, tANI_U32 sessionId,
                              FullPowerReqCb fullpwrReqCb,void *callbackContext,

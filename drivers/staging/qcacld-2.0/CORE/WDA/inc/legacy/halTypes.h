@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014, 2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -349,14 +349,10 @@ typedef enum
  * supported by rome/prima hardware
  */
 #define MIN_TX_PWR_CAP    8
-#define MAX_TX_PWR_CAP    22
+#define MAX_TX_PWR_CAP    30
 
 /* Moving the miscellaneous defination required by UMAC are moved here from
  * volansdefs.h */
-/* --------------------------------------------------------------------
- * Support definitions for taurus
- * --------------------------------------------------------------------
- */
 
 /*
  * Volans supports 8 stations in hardware

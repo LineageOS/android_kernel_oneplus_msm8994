@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014, 2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -20,12 +20,10 @@
  */
 
 /*
- * Copyright (c) 2014 Qualcomm Atheros, Inc.
- * All Rights Reserved.
- * Qualcomm Atheros Confidential and Proprietary.
- *
+ * This file was originally distributed by Qualcomm Atheros, Inc.
+ * under proprietary terms before Copyright ownership was assigned
+ * to the Linux Foundation.
  */
-
 
 /*========================================================================
 
@@ -234,7 +232,6 @@ void epping_exit(v_CONTEXT_t pVosContext)
    }
 #endif /* HIF_PCI */
    epping_cookie_cleanup(pEpping_ctx);
-   vos_mem_free(pEpping_ctx);
 }
 
 void epping_driver_exit(v_CONTEXT_t pVosContext)
@@ -252,13 +249,11 @@ void epping_driver_exit(v_CONTEXT_t pVosContext)
    }
    else
    {
-#ifdef QCA_PKT_PROTO_TRACE
-      vos_pkt_proto_trace_close();
-#endif /* QCA_PKT_PROTO_TRACE */
-      //pHddCtx->isUnloadInProgress = TRUE;
+      vos_set_unload_in_progress(TRUE);
       vos_set_load_unload_in_progress(VOS_MODULE_ID_VOSS, TRUE);
    }
    hif_unregister_driver();
+   vos_mem_free(pEpping_ctx);
    vos_preClose( &pVosContext );
 #ifdef MEMORY_DEBUG
    vos_mem_exit();
