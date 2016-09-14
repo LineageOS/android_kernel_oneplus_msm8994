@@ -1247,14 +1247,6 @@ static void gesture_judge(struct synaptics_ts_data *ts)
 /***************end****************/
 static char prlog_count = 0;
 
-#ifdef VENDOR_EDIT //WayneChang, 2015/12/02, add for key to abs, simulate key in abs through virtual key system
-extern struct completion key_cm;
-extern bool key_back_pressed;
-extern bool key_appselect_pressed;
-extern bool key_home_pressed;
-extern bool virtual_key_enable;
-#endif
-
 void int_touch(void)
 {
         struct synaptics_ts_data *ts;
@@ -1264,12 +1256,6 @@ void int_touch(void)
 	uint8_t finger_status = 0;
 	struct point_info points;
 	uint32_t finger_info = 0;
-#ifdef VENDOR_EDIT //WayneChang, 2015/12/02, add for key to abs, simulate key in abs through virtual key system
-	bool key_appselect_check = false;
-	bool key_back_check = false;
-	bool key_home_check = false;
-	bool key_pressed = key_appselect_pressed || key_back_pressed || key_home_pressed;
-#endif
 
         if (ts_g == NULL)
             return;
@@ -1293,55 +1279,7 @@ void int_touch(void)
 		points.raw_y = buf[i*8+7] & 0x0f;
 		points.z = buf[i*8+5];
 		finger_info <<= 1;
-#ifdef VENDOR_EDIT //WayneChang, 2015/12/02, add for key to abs, simulate key in abs through virtual key system  
-		if(virtual_key_enable){
-			if(points.y > 0x770 && key_pressed){
-					TPD_DEBUG("Drop TP event due to key pressed\n");
-					finger_status = 0;
-			}else{
-				finger_status =  points.status & 0x03;
-			}
-		}else{
 	        finger_status =  points.status & 0x03;
-		}
-#endif
-
-#ifdef VENDOR_EDIT //WayneChang, 2015/12/02, add for key to abs, simulate key in abs through virtual key system 
-		if(virtual_key_enable){
-                if (!finger_status){
-                    if (key_appselect_pressed && !key_appselect_check){
-                        points.x = 0xb4;
-                        points.y = 0x7e2;
-                        points.z = 0x33;
-                        points.raw_x = 4;
-                        points.raw_y = 6;
-		        key_appselect_check = true;
-                        points.status = 1;
-                        finger_status =  points.status & 0x03;
-                    }else if (key_back_pressed && !key_back_check){
-                        points.x = 0x384;
-                        points.y = 0x7e2;
-                        points.z = 0x33;
-                        points.raw_x = 4;
-                        points.raw_y = 6;
-		        key_back_check = true;
-                        points.status = 1;
-                        finger_status =  points.status & 0x03;
-                    }else if(key_home_pressed && !key_home_check){
-                        points.x = 0x21c;
-                        points.y = 0x7e2;
-                        points.z = 0x33;
-                        points.raw_x = 4;
-                        points.raw_y = 6;
-		        key_home_check = true;
-                        points.status = 1;
-                        finger_status =  points.status & 0x03;               
-	            }else{
-                        //TPD_DEBUG(" finger %d with !finger_statue and no key match\n",i);
-                    }
-                }
-		}
-#endif
 
 		if (finger_status) {
 			input_mt_slot(ts->input_dev, i);
@@ -1356,11 +1294,6 @@ void int_touch(void)
 			//#endif
 #ifndef TYPE_B_PROTOCOL
 			input_mt_sync(ts->input_dev);
-#endif
-#ifdef VENDOR_EDIT //WayneChang, 2015/12/02, add for key to abs, simulate key in abs through virtual key system 
-			if(virtual_key_enable){
-                complete(&key_cm);
-			}
 #endif
 			finger_num++;
 			finger_info |= 1 ;
