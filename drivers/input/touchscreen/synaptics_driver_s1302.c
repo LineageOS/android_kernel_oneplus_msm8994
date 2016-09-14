@@ -675,17 +675,6 @@ static char log_count = 0;
 #define REP_KEY_BACK (key_reverse?(KEY_MENU):(KEY_BACK))
 #endif
 
-#ifdef VENDOR_EDIT //WayneChang, 2015/12/02, add for key to abs, simulate key in abs through virtual key system
-struct completion key_cm;
-bool key_appselect_pressed = false;
-bool key_back_pressed = false;
-EXPORT_SYMBOL(key_appselect_pressed);
-EXPORT_SYMBOL(key_back_pressed);
-EXPORT_SYMBOL(key_cm);
-
-extern void int_touch(void);
-#endif
-
 static void int_key(struct synaptics_ts_data *ts )
 {
 
@@ -739,68 +728,6 @@ static void int_key(struct synaptics_ts_data *ts )
     return;
 }
 
-#ifdef VENDOR_EDIT //WayneChang, 2015/12/29, add flag to enable virtual key
-static void int_virtual_key(struct synaptics_ts_data *ts )
-{
-
-    int ret;
-    int button_key;
-    long time =0 ;
-    bool key_up_report = false;
-
-    ret = synaptics_rmi4_i2c_write_byte(ts->client, 0xff, 0x02 );
-    if (ret < 0) {
-        TPD_ERR("%s: Failed to change page 2!!\n",
-                __func__);
-        return;
-    }
-
-    button_key = synaptics_rmi4_i2c_read_byte(ts->client,0x00);
-    if (6 == (++log_count % 12))
-        printk("%s	button_key:%d   pre_btn_state:%d\n",__func__,button_key,ts->pre_btn_state);
-    if((button_key & 0x01) && !(ts->pre_btn_state & 0x01))//back
-    {
-	key_back_pressed = true;
-    }else if(!(button_key & 0x01) && (ts->pre_btn_state & 0x01)){
-	key_back_pressed = false;
-	key_up_report = true;
-    }
-
-    if((button_key & 0x02) && !(ts->pre_btn_state & 0x02))//menu
-    {
-	key_appselect_pressed = true;
-    }else if(!(button_key & 0x02) && (ts->pre_btn_state & 0x02)){
-	key_appselect_pressed = false;
-	key_up_report = true;
-    }
-
-    if((button_key & 0x04) && !(ts->pre_btn_state & 0x04))//home
-    {
-        input_report_key(ts->input_dev, KEY_HOMEPAGE, 1);//KEY_HOMEPAGE
-        input_sync(ts->input_dev);
-    }else if(!(button_key & 0x04) && (ts->pre_btn_state & 0x04)){
-        input_report_key(ts->input_dev, KEY_HOMEPAGE, 0);
-        input_sync(ts->input_dev);
-    }
-    if(key_up_report){
-        INIT_COMPLETION(key_cm);
-        time = wait_for_completion_timeout(&key_cm,msecs_to_jiffies(60));
-        if (!time)
-            int_touch();
-    }else{
-        int_touch();
-    }
-    ts->pre_btn_state = button_key & 0x07;
-    ret = synaptics_rmi4_i2c_write_byte(ts->client, 0xff, 0x00);
-    if (ret < 0) {
-        TPD_ERR("%s: Failed to change page 2!!\n",
-                __func__);
-        return;
-    }
-    return;
-}
-#endif
-
 static void synaptics_ts_report(struct synaptics_ts_data *ts )
 {
     int ret;
@@ -825,12 +752,9 @@ static void synaptics_ts_report(struct synaptics_ts_data *ts )
     }
     if( inte & 0x10) {
 #ifdef VENDOR_EDIT //WayneChang, 2015/12/29, add flag to enable virtual key
-		if(virtual_key_enable){
-            int_virtual_key(ts);
-        }
-		else{
-			int_key(ts);
-        }
+	if(!virtual_key_enable){
+		int_key(ts);
+	}
 #else
         int_key(ts);
 #endif
@@ -1611,9 +1535,6 @@ static int synaptics_ts_probe(struct i2c_client *client, const struct i2c_device
 
 	synaptics_parse_dts(&client->dev, ts);
 
-#ifdef VENDOR_EDIT //WayneChang, 2015/12/02, add for key to abs, simulate key in abs through virtual key system
-        init_completion(&key_cm);
-#endif
 	mutex_init(&ts->mutex);
 	synaptics_s1302_proc();
 	ts->is_suspended = 0;
