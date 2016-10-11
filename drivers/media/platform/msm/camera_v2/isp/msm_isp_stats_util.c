@@ -80,7 +80,7 @@ static int32_t msm_isp_stats_buf_divert(struct vfe_device *vfe_dev,
 
 	if (!vfe_dev || !done_buf || !ts || !buf_event || !stream_info ||
 		!comp_stats_type_mask) {
-		pr_err("%s:%d failed: invalid params %p %p %p %p %p %p\n",
+		pr_err("%s:%d failed: invalid params %pK %pK %pK %pK %pK %pK\n",
 			__func__, __LINE__, vfe_dev, done_buf, ts, buf_event,
 			stream_info, comp_stats_type_mask);
 		return -EINVAL;
