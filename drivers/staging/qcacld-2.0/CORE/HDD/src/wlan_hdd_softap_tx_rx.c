@@ -365,13 +365,24 @@ int __hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
            /* Proto Trace enabled */
            proto_type = vos_pkt_get_proto_type(skb,
                         hddCtxt->cfg_ini->gEnableDebugLog, 0);
-           if (VOS_PKT_TRAC_TYPE_EAPOL & proto_type)
-           {
+           switch (proto_type) {
+           case VOS_PKT_TRAC_TYPE_EAPOL:
                vos_pkt_trace_buf_update("HA:T:EPL");
-           }
-           else if (VOS_PKT_TRAC_TYPE_DHCP & proto_type)
-           {
+               break;
+           case VOS_PKT_TRAC_TYPE_DHCP:
                hdd_dhcp_pkt_trace_buf_update(skb, TX_PATH, AP);
+               break;
+           case VOS_PKT_TRAC_TYPE_ARP:
+               vos_pkt_trace_buf_update("HA:T:ARP");
+               break;
+           case VOS_PKT_TRAC_TYPE_NS:
+               vos_pkt_trace_buf_update("HA:T:NS");
+               break;
+           case VOS_PKT_TRAC_TYPE_NA:
+               vos_pkt_trace_buf_update("HA:T:NA");
+               break;
+           default:
+               break;
            }
        }
 #endif /* QCA_PKT_PROTO_TRACE */
@@ -835,20 +846,35 @@ VOS_STATUS hdd_softap_rx_packet_cbk(v_VOID_t *vosContext,
       ++pAdapter->stats.rx_packets;
       pAdapter->stats.rx_bytes += skb->len;
 
-      DPTRACE(adf_dp_trace(rxBuf,
+      DPTRACE(adf_dp_trace(skb,
               ADF_DP_TRACE_RX_HDD_PACKET_PTR_RECORD,
-              adf_nbuf_data_addr(rxBuf),
-              sizeof(adf_nbuf_data(rxBuf)), ADF_RX));
+              adf_nbuf_data_addr(skb),
+              sizeof(adf_nbuf_data(skb)), ADF_RX));
 
 #ifdef QCA_PKT_PROTO_TRACE
       if ((pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_EAPOL) ||
           (pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_DHCP)) {
          proto_type = vos_pkt_get_proto_type(skb,
                            pHddCtx->cfg_ini->gEnableDebugLog, 0);
-         if (VOS_PKT_TRAC_TYPE_EAPOL & proto_type)
-            vos_pkt_trace_buf_update("HA:R:EPL");
-         else if (VOS_PKT_TRAC_TYPE_DHCP & proto_type)
-            hdd_dhcp_pkt_trace_buf_update(skb, RX_PATH, AP);
+         switch (proto_type) {
+         case VOS_PKT_TRAC_TYPE_EAPOL:
+             vos_pkt_trace_buf_update("HA:R:EPL");
+             break;
+         case VOS_PKT_TRAC_TYPE_DHCP:
+             hdd_dhcp_pkt_trace_buf_update(skb, RX_PATH, AP);
+             break;
+         case VOS_PKT_TRAC_TYPE_ARP:
+             vos_pkt_trace_buf_update("HA:R:ARP");
+             break;
+         case VOS_PKT_TRAC_TYPE_NS:
+             vos_pkt_trace_buf_update("HA:R:NS");
+             break;
+         case VOS_PKT_TRAC_TYPE_NA:
+             vos_pkt_trace_buf_update("HA:R:NA");
+             break;
+         default:
+             break;
+         }
       }
 #endif /* QCA_PKT_PROTO_TRACE */
 

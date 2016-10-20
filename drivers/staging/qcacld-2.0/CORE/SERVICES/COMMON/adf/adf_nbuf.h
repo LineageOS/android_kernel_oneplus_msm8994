@@ -53,6 +53,8 @@
 #define NBUF_PKT_TRAC_TYPE_DHCP    0x04
 #define NBUF_PKT_TRAC_TYPE_MGMT_ACTION    0x08
 #define NBUF_PKT_TRAC_TYPE_ARP     0x10
+#define NBUF_PKT_TRAC_TYPE_NS      0x20
+#define NBUF_PKT_TRAC_TYPE_NA      0x40
 #define NBUF_PKT_TRAC_MAX_STRING   12
 #define NBUF_PKT_TRAC_PROTO_STRING 4
 #define ADF_NBUF_PKT_ERROR         1
@@ -176,7 +178,8 @@ struct mon_rx_status {
 #define ICMPV6_SUBTYPE_OFFSET         54
 #define ICMPV6_REQUEST                0x80
 #define ICMPV6_RESPONSE               0x81
-
+#define ICMPV6_NS                     0x87
+#define ICMPV6_NA                     0x88
 #define ADF_NBUF_IPA_CHECK_MASK       0x80000000
 
 enum adf_proto_type {
@@ -207,6 +210,8 @@ enum adf_proto_subtype {
 	ADF_PROTO_ICMP_RES,
 	ADF_PROTO_ICMPV6_REQ,
 	ADF_PROTO_ICMPV6_RES,
+	ADF_PROTO_ICMPV6_NS,
+	ADF_PROTO_ICMPV6_NA,
 	ADF_PROTO_IPV4_UDP,
 	ADF_PROTO_IPV4_TCP,
 	ADF_PROTO_IPV6_UDP,
@@ -1544,11 +1549,11 @@ adf_nbuf_data_get_ipv6_proto(uint8_t *data)
  *
  * This func. checks whether it is a DHCP packet or not.
  *
- * Return: A_STATUS_OK if it is a DHCP packet
- *         A_STATUS_FAILED if not
+ * Return: TRUE if it is a DHCP packet
+ *         FALSE if not
  */
-static inline a_status_t
-adf_nbuf_is_dhcp_pkt(adf_nbuf_t buf)
+static inline
+bool adf_nbuf_is_dhcp_pkt(adf_nbuf_t buf)
 {
 	return __adf_nbuf_data_is_dhcp_pkt(adf_nbuf_data(buf));
 }
@@ -1559,11 +1564,11 @@ adf_nbuf_is_dhcp_pkt(adf_nbuf_t buf)
  *
  * This func. checks whether it is a DHCP packet or not.
  *
- * Return: A_STATUS_OK if it is a DHCP packet
- *         A_STATUS_FAILED if not
+ * Return: TRUE if it is a DHCP packet
+ *         FALSE if not
  */
-static inline a_status_t
-adf_nbuf_data_is_dhcp_pkt(uint8_t *data)
+static inline
+bool adf_nbuf_data_is_dhcp_pkt(uint8_t *data)
 {
 	return __adf_nbuf_data_is_dhcp_pkt(data);
 }
@@ -1574,11 +1579,11 @@ adf_nbuf_data_is_dhcp_pkt(uint8_t *data)
  *
  * This func. checks whether it is a EAPOL packet or not.
  *
- * Return: A_STATUS_OK if it is a EAPOL packet
- *         A_STATUS_FAILED if not
+ * Return: TRUE if it is a EAPOL packet
+ *         FALSE if not
  */
-static inline a_status_t
-adf_nbuf_is_eapol_pkt(adf_nbuf_t buf)
+static inline
+bool adf_nbuf_is_eapol_pkt(adf_nbuf_t buf)
 {
 	return __adf_nbuf_data_is_eapol_pkt(adf_nbuf_data(buf));
 }
@@ -1589,11 +1594,11 @@ adf_nbuf_is_eapol_pkt(adf_nbuf_t buf)
  *
  * This func. checks whether it is a EAPOL packet or not.
  *
- * Return: A_STATUS_OK if it is a EAPOL packet
- *         A_STATUS_FAILED if not
+ * Return: TRUE if it is a EAPOL packet
+ *         FALSE if not
  */
-static inline a_status_t
-adf_nbuf_data_is_eapol_pkt(uint8_t *data)
+static inline
+bool adf_nbuf_data_is_eapol_pkt(uint8_t *data)
 {
 	return __adf_nbuf_data_is_eapol_pkt(data);
 }
