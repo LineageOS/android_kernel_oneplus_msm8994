@@ -129,7 +129,7 @@
 
 #define IPA_HW_TABLE_ALIGNMENT(start_ofst) \
 	(((start_ofst) + 127) & ~127)
-#define IPA_RT_FLT_HW_RULE_BUF_SIZE	(128)
+#define IPA_RT_FLT_HW_RULE_BUF_SIZE	(256)
 
 #define IPA_HDR_PROC_CTX_TABLE_ALIGNMENT_BYTE 8
 #define IPA_HDR_PROC_CTX_TABLE_ALIGNMENT(start_ofst) \
@@ -993,7 +993,7 @@ union IpaHwMhiDlUlSyncCmdData_t {
  */
 struct ipa_uc_ctx {
 	bool uc_inited;
-	bool uc_loaded;
+	atomic_t uc_loaded;
 	bool uc_failed;
 	struct mutex uc_lock;
 	struct completion uc_completion;
