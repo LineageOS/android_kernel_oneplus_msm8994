@@ -746,7 +746,6 @@ static void dwc3_otg_sm_work(struct work_struct *w)
  *
  * Returns 0 on success otherwise negative errno.
  */
-
 int dwc3_otg_init(struct dwc3 *dwc)
 {
 	struct dwc3_otg *dotg;
