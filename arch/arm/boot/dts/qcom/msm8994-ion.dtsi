@@ -21,6 +21,11 @@
 			qcom,ion-heap-type = "SYSTEM";
 		};
 
+		qcom,ion-heap@21 {
+			reg = <0x15>;
+			qcom,ion-heap-type = "SYSTEM_CONTIG";
+		};
+
 		qcom,ion-heap@8 { /* CP_MM HEAP */
 			compatible = "qcom,msm-ion-reserve";
 			reg = <8>;
