@@ -310,6 +310,14 @@ typedef struct tagCsrScanRequest
     eCsrRequestType requestType;    //11d scan or full scan
     tANI_BOOLEAN p2pSearch;
     tANI_BOOLEAN skipDfsChnlInP2pSearch;
+
+    uint32_t enable_scan_randomization;
+    uint8_t mac_addr[VOS_MAC_ADDR_SIZE];
+    uint8_t mac_addr_mask[VOS_MAC_ADDR_SIZE];
+    bool ie_whitelist;
+    uint32_t probe_req_ie_bitmap[PROBE_REQ_BITMAP_LEN];
+    uint32_t num_vendor_oui;
+    struct vendor_oui *voui;
 }tCsrScanRequest;
 
 typedef struct tagCsrBGScanRequest
@@ -1020,6 +1028,7 @@ typedef struct tagCsrRoamProfile
     uint16_t beacon_tx_rate;
     tSirMacRateSet  supported_rates;
     tSirMacRateSet  extended_rates;
+    uint8_t sub20_channelwidth;
 }tCsrRoamProfile;
 
 
@@ -1146,6 +1155,7 @@ enum sta_roam_policy_dfs_mode {
 struct csr_sta_roam_policy_params {
 	enum sta_roam_policy_dfs_mode dfs_mode;
 	bool skip_unsafe_channels;
+	uint8_t sap_operating_band;
 };
 
 typedef struct tagCsrConfigParam
@@ -1214,8 +1224,6 @@ typedef struct tagCsrConfigParam
     tANI_U32  nInitialDwellTime;      //in units of milliseconds
     bool      initial_scan_no_dfs_chnl;
 
-    tANI_U32  nActiveMinChnTimeBtc;     //in units of milliseconds
-    tANI_U32  nActiveMaxChnTimeBtc;     //in units of milliseconds
     tANI_U32  disableAggWithBtc;
 #ifdef WLAN_AP_STA_CONCURRENCY
     tANI_U32  nPassiveMinChnTimeConc;    //in units of milliseconds
@@ -1491,6 +1499,20 @@ typedef struct tagCsrRoamInfo
         struct ndi_delete_rsp ndi_delete_params;
     } ndp;
 #endif
+
+    /* Extended capabilities of STA */
+    uint8_t ecsa_capable;
+    bool                 ampdu;
+    bool                 sgi_enable;
+    bool                 tx_stbc;
+    bool                 rx_stbc;
+    tSirMacHTChannelWidth ch_width;
+    enum sir_sme_phy_mode mode;
+    uint8_t              max_supp_idx;
+    uint8_t              max_ext_idx;
+    uint8_t              max_mcs_idx;
+    uint8_t              rx_mcs_map;
+    uint8_t              tx_mcs_map;
 }tCsrRoamInfo;
 
 
@@ -1521,6 +1543,19 @@ typedef struct sSirSmeAssocIndToUpperLayerCnf
     /* Timing and fine Timing measurement capability clubbed together */
     tANI_U8              timingMeasCap;
     tSirSmeChanInfo      chan_info;
+    /* Extended capabilities of STA */
+    uint8_t              ecsa_capable;
+    bool                 ampdu;
+    bool                 sgi_enable;
+    bool                 tx_stbc;
+    tSirMacHTChannelWidth ch_width;
+    enum sir_sme_phy_mode mode;
+    bool                 rx_stbc;
+    uint8_t              max_supp_idx;
+    uint8_t              max_ext_idx;
+    uint8_t              max_mcs_idx;
+    uint8_t              rx_mcs_map;
+    uint8_t              tx_mcs_map;
 } tSirSmeAssocIndToUpperLayerCnf, *tpSirSmeAssocIndToUpperLayerCnf;
 
 typedef struct tagCsrSummaryStatsInfo
@@ -1719,6 +1754,17 @@ struct tagCsrDelStaParams
     tCsrBssid peerMacAddr;
     u16 reason_code;
     u8 subtype;
+};
+
+/**
+ * struct csr_set_tx_max_pwr_per_band - Req params to
+ * set max tx power per band
+ * @band: band for which power to be set
+ * @power: power to set in dB
+ */
+struct csr_set_tx_max_pwr_per_band {
+	eCsrBand band;
+	tPowerdBm power;
 };
 
 /**
@@ -1967,4 +2013,30 @@ typedef void (*csr_mib_stats_callback)
  */
 typedef void (*tcsr_fw_state_callback)(void *context);
 void csr_packetdump_timer_stop(void);
+#ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
+typedef struct _session_info{
+	tVOS_CON_MODE con_mode;
+	eCsrBand band;
+	v_U16_t och;
+	v_U16_t lfreq;
+	v_U16_t hfreq;
+	v_U16_t cfreq;
+	v_U16_t hbw;
+}session_info_t;
+tANI_BOOLEAN csr_find_all_session_info(
+	tHalHandle hHal,
+	session_info_t *session_info,
+	v_U8_t * session_count);
+tANI_BOOLEAN csr_find_sta_session_info(
+	tHalHandle hHal,
+	session_info_t *info);
+tANI_BOOLEAN csr_create_sap_session_info(
+	tHalHandle hHal,
+	eCsrPhyMode sap_phymode,
+	v_U16_t sap_ch,
+	session_info_t *session_info);
+#endif
+struct lim_channel_status *csr_get_channel_status(
+	void *p_mac, uint32_t channel_id);
+void csr_clear_channel_status(void *p_mac);
 #endif

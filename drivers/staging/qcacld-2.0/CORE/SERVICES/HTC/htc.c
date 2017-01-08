@@ -36,6 +36,8 @@
 #include "epping_main.h"
 #include "htc_api.h"
 
+#define MAX_HTC_RX_BUNDLE  2
+
 #ifdef WLAN_DEBUG
 static ATH_DEBUG_MASK_DESCRIPTION g_HTCDebugDescription[] = {
     { ATH_DEBUG_SEND , "Send"},
@@ -144,6 +146,7 @@ static void HTCCleanup(HTC_TARGET *target)
 {
     HTC_PACKET *pPacket;
     adf_nbuf_t netbuf;
+    int j;
 
     if (target->hif_dev != NULL) {
         HIFDetachHTC(target->hif_dev);
@@ -207,6 +210,11 @@ static void HTCCleanup(HTC_TARGET *target)
     adf_os_spinlock_destroy(&target->HTCTxLock);
     adf_os_spinlock_destroy(&target->HTCCreditLock);
 
+    for (j = 0; j < ENDPOINT_MAX; j++) {
+        HTC_ENDPOINT *endpoint = &target->EndPoint[j];
+        adf_os_spinlock_destroy(&endpoint->htc_endpoint_rx_lock);
+    }
+
     /* free our instance */
     A_FREE(target);
 }
@@ -218,7 +226,7 @@ HTC_HANDLE HTCCreate(void *ol_sc, HTC_INIT_INFO *pInfo, adf_os_device_t osdev)
     MSG_BASED_HIF_CALLBACKS htcCallbacks;
     HTC_ENDPOINT            *pEndpoint=NULL;
     HTC_TARGET              *target = NULL;
-    int                     i;
+    int                     i, j;
 
     AR_DEBUG_PRINTF(ATH_DEBUG_INFO, ("+HTCCreate ..  HIF :%p \n",hHIF));
 
@@ -235,6 +243,11 @@ HTC_HANDLE HTCCreate(void *ol_sc, HTC_INIT_INFO *pInfo, adf_os_device_t osdev)
     adf_os_spinlock_init(&target->HTCRxLock);
     adf_os_spinlock_init(&target->HTCTxLock);
     adf_os_spinlock_init(&target->HTCCreditLock);
+
+    for (j = 0; j < ENDPOINT_MAX; j++) {
+        pEndpoint = &target->EndPoint[j];
+        adf_os_spinlock_init(&pEndpoint->htc_endpoint_rx_lock);
+    }
     target->is_nodrop_pkt = FALSE;
 
     do {
@@ -523,6 +536,8 @@ A_STATUS HTCWaitTarget(HTC_HANDLE HTCHandle)
     HTC_SERVICE_CONNECT_RESP resp;
     HTC_READY_MSG *rdy_msg;
     A_UINT16 htc_rdy_msg_id;
+    A_UINT8 i = 0;
+    HTC_PACKET *pRxBundlePacket, *pTempBundlePacket;
 
     AR_DEBUG_PRINTF(ATH_DEBUG_TRC, ("HTCWaitTarget - Enter (target:0x%p) \n", HTCHandle));
     AR_DEBUG_PRINTF(ATH_DEBUG_ANY, ("+HWT\n"));
@@ -577,6 +592,20 @@ A_STATUS HTCWaitTarget(HTC_HANDLE HTCHandle)
             status = A_ECOMM;
             break;
         }
+
+        /* Allocate expected number of RX bundle buffer allocation */
+        pTempBundlePacket = NULL;
+        for (i = 0; i < MAX_HTC_RX_BUNDLE; i++) {
+            pRxBundlePacket = AllocateHTCBundleRxPacket(target);
+            if (pRxBundlePacket != NULL) {
+                pRxBundlePacket->ListLink.pNext = (DL_LIST *)pTempBundlePacket;
+            } else {
+                break;
+            }
+            pTempBundlePacket = pRxBundlePacket;
+        }
+        target->pBundleFreeRxList = pTempBundlePacket;
+
             /* done processing */
         target->CtrlResponseProcessing = FALSE;
 

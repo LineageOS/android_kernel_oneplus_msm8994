@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2016 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -654,6 +654,7 @@ WLANSAP_SetScanAcsChannelParams(tsap_Config_t *pConfig,
 #endif
     pSapCtx->scanBandPreference = pConfig->scanBandPreference;
     pSapCtx->acsBandSwitchThreshold = pConfig->acsBandSwitchThreshold;
+    pSapCtx->auto_channel_select_weight = pConfig->auto_channel_select_weight;
     pSapCtx->pUsrContext = pUsrContext;
     pSapCtx->enableOverLapCh = pConfig->enOverLapCh;
     /*
@@ -774,6 +775,8 @@ WLANSAP_StartBss
 #endif
         pSapCtx->scanBandPreference = pConfig->scanBandPreference;
         pSapCtx->acsBandSwitchThreshold = pConfig->acsBandSwitchThreshold;
+        pSapCtx->auto_channel_select_weight =
+            pConfig->auto_channel_select_weight;
         pSapCtx->pUsrContext = pUsrContext;
         pSapCtx->enableOverLapCh = pConfig->enOverLapCh;
         pSapCtx->acs_cfg = &pConfig->acs_cfg;
@@ -819,6 +822,10 @@ WLANSAP_StartBss
          */
         pmac->sap.SapDfsInfo.disable_dfs_ch_switch =
                                    pConfig->disableDFSChSwitch;
+        pmac->sap.SapDfsInfo.sap_ch_switch_beacon_cnt =
+            pConfig->sap_chanswitch_beacon_cnt;
+        pmac->sap.SapDfsInfo.sap_ch_switch_mode =
+            pConfig->sap_chanswitch_mode;
         // Copy MAC filtering settings to sap context
         pSapCtx->eSapMacAddrAclMode = pConfig->SapMacaddr_acl;
         vos_mem_copy(pSapCtx->acceptMacList, pConfig->accept_mac, sizeof(pConfig->accept_mac));
@@ -1262,32 +1269,19 @@ WLANSAP_ClearACL
 )
 {
     ptSapContext  pSapCtx = VOS_GET_SAP_CB(pCtx);
-    v_U8_t i;
 
     if (NULL == pSapCtx)
     {
         return VOS_STATUS_E_RESOURCES;
     }
 
-    if (pSapCtx->denyMacList != NULL)
-    {
-        for (i = 0; i < (pSapCtx->nDenyMac-1); i++)
-        {
-            vos_mem_zero((pSapCtx->denyMacList+i)->bytes, sizeof(v_MACADDR_t));
+    vos_mem_zero(&pSapCtx->denyMacList, sizeof(pSapCtx->denyMacList));
 
-        }
-    }
     sapPrintACL(pSapCtx->denyMacList, pSapCtx->nDenyMac);
     pSapCtx->nDenyMac  = 0;
 
-    if (pSapCtx->acceptMacList!=NULL)
-    {
-        for (i = 0; i < (pSapCtx->nAcceptMac-1); i++)
-        {
-            vos_mem_zero((pSapCtx->acceptMacList+i)->bytes, sizeof(v_MACADDR_t));
+    vos_mem_zero(&pSapCtx->acceptMacList, sizeof(pSapCtx->acceptMacList));
 
-        }
-    }
     sapPrintACL(pSapCtx->acceptMacList, pSapCtx->nAcceptMac);
     pSapCtx->nAcceptMac = 0;
 
@@ -1666,7 +1660,8 @@ WLANSAP_SetChannelChangeWithCsa(v_PVOID_t pvosGCtx, v_U32_t targetChannel)
          /*
           * validate target channel switch w.r.t various concurrency rules set.
           */
-         valid = sme_validate_sap_channel_switch(VOS_GET_HAL_CB(sapContext->pvosGCtx),
+         valid = sap_channel_switch_validate(sapContext,
+                  VOS_GET_HAL_CB(sapContext->pvosGCtx),
                   targetChannel, sapContext->csrRoamProfile.phyMode,
                   sapContext->cc_switch_mode, sapContext->sessionId);
          if (!valid)
@@ -1762,6 +1757,118 @@ WLANSAP_SetChannelChangeWithCsa(v_PVOID_t pvosGCtx, v_U32_t targetChannel)
 
     return VOS_STATUS_SUCCESS;
 }
+
+#ifdef FEATURE_WLAN_SUB_20_MHZ
+/**
+ * WLANSAP_set_sub20_channelwidth_with_csa() -
+ *	This api function does a channel width change
+ * @vos_ctx_ptr: Pointer to vos global context structure
+ * @chan_width:  New channel width to change to
+ *
+ * Return: The VOS_STATUS code associated with performing
+ *	the operation
+ */
+VOS_STATUS
+WLANSAP_set_sub20_channelwidth_with_csa(void *vos_ctx_ptr, uint32_t chan_width)
+{
+	ptSapContext sap_context_ptr = NULL;
+	tWLAN_SAPEvent sap_event;
+	tpAniSirGlobal mac_ptr = NULL;
+	void *hal_ptr = NULL;
+
+	sap_context_ptr = VOS_GET_SAP_CB(vos_ctx_ptr);
+	if (NULL == sap_context_ptr) {
+		VOS_TRACE(VOS_MODULE_ID_SAP,
+			  VOS_TRACE_LEVEL_ERROR,
+			  "%s: Invalid SAP pointer from pvosGCtx", __func__);
+
+		return VOS_STATUS_E_FAULT;
+	}
+	hal_ptr = VOS_GET_HAL_CB(sap_context_ptr->pvosGCtx);
+	if (NULL == hal_ptr) {
+		VOS_TRACE(VOS_MODULE_ID_SAP,
+			  VOS_TRACE_LEVEL_ERROR,
+			  "%s: Invalid HAL pointer from pvosGCtx", __func__);
+		return VOS_STATUS_E_FAULT;
+	}
+	mac_ptr = PMAC_STRUCT(hal_ptr);
+
+	/*
+	 * Now, validate if the passed channel is valid in the
+	 * current regulatory domain.
+	 */
+	if (sap_context_ptr->sub20_channelwidth != chan_width &&
+	    ((vos_nv_getChannelEnabledState(sap_context_ptr->channel) ==
+	    NV_CHANNEL_ENABLE) ||
+	    (vos_nv_getChannelEnabledState(sap_context_ptr->channel) ==
+	    NV_CHANNEL_DFS &&
+	    !vos_concurrent_open_sessions_running()))) {
+		/*
+		 * Post a CSA IE request to SAP state machine with
+		 * target channel information and also CSA IE required
+		 * flag set in sapContext only, if SAP is in eSAP_STARTED
+		 * state.
+		 */
+		if (eSAP_STARTED == sap_context_ptr->sapsMachine) {
+			mac_ptr->sap.SapDfsInfo.target_channel =
+				 sap_context_ptr->channel;
+			mac_ptr->sap.SapDfsInfo.new_chanWidth =
+				sap_context_ptr->ch_width_orig;
+			mac_ptr->sap.SapDfsInfo.new_sub20_channelwidth =
+				 chan_width;
+			mac_ptr->sap.SapDfsInfo.csaIERequired =
+				 VOS_TRUE;
+
+			/*
+			 * Set the radar found status to allow the channel
+			 * change to happen same as in the case of a radar
+			 * detection. Since, this will allow SAP to be in
+			 * correct state and also resume the netif queues
+			 * that were suspended in HDD before the channel
+			 * request was issued.
+			 */
+			mac_ptr->sap.SapDfsInfo.sap_radar_found_status =
+				 VOS_TRUE;
+			mac_ptr->sap.SapDfsInfo.cac_state = eSAP_DFS_SKIP_CAC;
+			sap_CacResetNotify(hal_ptr);
+
+			/*
+			 * Post the eSAP_DFS_CHNL_SWITCH_ANNOUNCEMENT_START
+			 * to SAP state machine to process the channel
+			 * request with CSA IE set in the beacons.
+			 */
+			sap_event.event =
+				 eSAP_DFS_CHNL_SWITCH_ANNOUNCEMENT_START;
+			sap_event.params = 0;
+			sap_event.u1 = 0;
+			sap_event.u2 = 0;
+
+			sapFsm(sap_context_ptr, &sap_event);
+
+		} else {
+			VOS_TRACE(VOS_MODULE_ID_SAP,
+				  VOS_TRACE_LEVEL_ERROR,
+				  "%s: SAP is not in eSAP_STARTED state",
+				  __func__);
+			return VOS_STATUS_E_FAULT;
+		}
+
+	} else {
+		VOS_TRACE(VOS_MODULE_ID_SAP,
+			  VOS_TRACE_LEVEL_ERROR,
+			  "%s: ChannelWidth = %d is not valid",
+			  __func__, chan_width);
+
+		return VOS_STATUS_E_FAULT;
+	}
+
+	VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO_HIGH,
+		  "%s: Posted CSA start evt for ChannelWidth = %d",
+		  __func__, chan_width);
+
+	return VOS_STATUS_SUCCESS;
+}
+#endif
 
 /*==========================================================================
   FUNCTION    WLANSAP_SetCounterMeasure
@@ -2778,6 +2885,14 @@ WLANSAP_ChannelChangeRequest(v_PVOID_t pSapCtx, uint8_t target_channel)
     }
     pMac = PMAC_STRUCT( hHal );
     phyMode = sapContext->csrRoamProfile.phyMode;
+
+    if (sapContext->csrRoamProfile.ChannelInfo.numOfChannels == 0 ||
+        sapContext->csrRoamProfile.ChannelInfo.ChannelList == NULL)
+    {
+        VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_ERROR,
+                   FL("Invalid channel list"));
+        return VOS_STATUS_E_FAULT;
+    }
     sapContext->csrRoamProfile.ChannelInfo.ChannelList[0] = target_channel;
     /*
      * We are getting channel bonding mode from sapDfsInfor structure
@@ -2790,6 +2905,12 @@ WLANSAP_ChannelChangeRequest(v_PVOID_t pSapCtx, uint8_t target_channel)
                                          pMac->sap.SapDfsInfo.new_chanWidth);
     sapContext->csrRoamProfile.vht_channel_width = vhtChannelWidth;
     sapContext->vht_channel_width = vhtChannelWidth;
+
+    sapContext->sub20_channelwidth =
+         pMac->sap.SapDfsInfo.new_sub20_channelwidth;
+    sapContext->csrRoamProfile.sub20_channelwidth =
+         pMac->sap.SapDfsInfo.new_sub20_channelwidth;
+
     /* Update the channel as this will be used to
      * send event to supplicant
      */
@@ -3735,6 +3856,26 @@ void WLANSAP_PopulateDelStaParams(const v_U8_t *mac,
                    MAC_ADDR_ARRAY(pDelStaParams->peerMacAddr));
 }
 
+#ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
+/**
+ * is_auto_channel_select() - is channel AUTO_CHANNEL_SELECT
+ * @p_vos_gctx: Pointer to ptSapContext
+ *
+ * Return: true on AUTO_CHANNEL_SELECT, false otherwise
+ */
+bool is_auto_channel_select(v_PVOID_t p_vos_gctx)
+{
+	ptSapContext sapcontext = VOS_GET_SAP_CB(p_vos_gctx);
+
+	if (NULL == sapcontext) {
+		VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_ERROR,
+			"%s: Invalid SAP pointer", __func__);
+		return 0;
+	}
+	return sapcontext->channel == AUTO_CHANNEL_SELECT;
+}
+#endif
+
 /*==========================================================================
   FUNCTION    WLANSAP_ACS_CHSelect
 
@@ -3791,7 +3932,7 @@ WLANSAP_ACS_CHSelect(v_PVOID_t pvosGCtx,
     pMac = PMAC_STRUCT( hHal );
     sapContext->acs_cfg = &pConfig->acs_cfg;
     sapContext->csrRoamProfile.phyMode = sapContext->acs_cfg->hw_mode;
-
+    sapContext->target_band = pConfig->target_band;
         /*
          * Copy the HDD callback function to report the
          * ACS result after scan in SAP context callback function.
@@ -3825,7 +3966,7 @@ WLANSAP_ACS_CHSelect(v_PVOID_t pvosGCtx,
 
         if (VOS_STATUS_E_ABORTED == vosStatus) {
             VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_ERROR,
-                       "In %s,DFS not supported in the current operating mode",
+                       "In %s, acs configuration not supported",
                         __func__);
             return VOS_STATUS_E_FAILURE;
         }
@@ -3913,6 +4054,31 @@ wlansap_get_chan_width(void *pvosctx, uint32_t *pchanwidth)
 	ptSapContext sapcontext;
 	sapcontext = VOS_GET_SAP_CB(pvosctx);
 	*pchanwidth = wlan_sap_get_vht_ch_width(sapcontext);
+
+	return VOS_STATUS_SUCCESS;
+}
+
+/*
+ * wlansap_set_invalid_session() - set session ID to invalid
+ * @pctx: pointer of global context
+ *
+ * This function sets session ID to invalid
+ *
+ * Return: VOS_STATUS
+ */
+VOS_STATUS
+wlansap_set_invalid_session(v_PVOID_t pctx)
+{
+	ptSapContext psapctx;
+	psapctx = VOS_GET_SAP_CB(pctx);
+	if ( NULL == psapctx) {
+		VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_ERROR,
+			FL("Invalid SAP pointer from pctx"));
+		return VOS_STATUS_E_FAILURE;
+	}
+
+	psapctx->sessionId = CSR_SESSION_ID_INVALID;
+	psapctx->isSapSessionOpen = eSAP_FALSE;
 
 	return VOS_STATUS_SUCCESS;
 }

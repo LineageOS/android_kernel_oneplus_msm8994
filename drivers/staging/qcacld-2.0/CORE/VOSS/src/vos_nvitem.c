@@ -1495,6 +1495,7 @@ VOS_STATUS vos_nv_getRegDomainFromCountryCode( v_REGDOMAIN_t *pRegDomain,
     hdd_context_t *pHddCtx = NULL;
     struct wiphy *wiphy = NULL;
     int i;
+    int wait_result;
 
     /* sanity checks */
     if (NULL == pRegDomain)
@@ -1600,15 +1601,69 @@ VOS_STATUS vos_nv_getRegDomainFromCountryCode( v_REGDOMAIN_t *pRegDomain,
         }
 
     } else if (COUNTRY_IE == source || COUNTRY_USER == source) {
+        INIT_COMPLETION(pHddCtx->reg_init);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)) || defined(WITH_BACKPORTS)
         regulatory_hint_user(country_code, NL80211_USER_REG_HINT_USER);
 #else
         regulatory_hint_user(country_code);
 #endif
+        wait_result = wait_for_completion_interruptible_timeout(
+                               &pHddCtx->reg_init,
+                               msecs_to_jiffies(REG_WAIT_TIME));
+        /*
+         * if the country information does not exist with the kernel,
+         * then the driver callback would not be called
+         */
+
+        if (wait_result >= 0)
+        {
+           VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_INFO,
+                       "runtime country code : %c%c is found in kernel db",
+                        country_code[0], country_code[1]);
+           *pRegDomain = temp_reg_domain;
+        }
+
+        else
+        {
+            VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_WARN,
+                       "runtime country code : %c%c is not found"
+                       " in kernel db",
+                        country_code[0], country_code[1]);
+
+            return VOS_STATUS_E_EXISTS;
+        }
     }
 
     *pRegDomain = temp_reg_domain;
     return VOS_STATUS_SUCCESS;
+}
+
+/* vos_is_fcc_regdomian() - is the regdomain FCC
+ *
+ * Return: true if FCC regdomain
+ *         false otherwise
+ */
+bool vos_is_fcc_regdomain(void)
+{
+	v_CONTEXT_t pVosContext = NULL;
+	hdd_context_t *pHddCtx = NULL;
+	v_REGDOMAIN_t domainId;
+
+	pVosContext = vos_get_global_context(VOS_MODULE_ID_SYS, NULL);
+
+	if (!pVosContext)
+		return false;
+	pHddCtx = vos_get_context(VOS_MODULE_ID_HDD, pVosContext);
+	if (!pHddCtx) {
+		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+				("Invalid pHddCtx pointer"));
+		return false;
+	}
+	vos_nv_getRegDomainFromCountryCode(&domainId,
+			pHddCtx->reg.alpha2, COUNTRY_QUERY);
+	if (REGDOMAIN_FCC == domainId)
+		return true;
+	return false;
 }
 
 #ifdef FEATURE_STATICALLY_ADD_11P_CHANNELS
@@ -1639,6 +1694,67 @@ bool vos_is_dsrc_channel(uint16_t center_freq)
     }
     return 0;
 }
+
+/**
+ * vos_is_channel_support_sub20() - check channel
+ * support sub20 channel width
+ * @oper_ch: operating channel
+ * @ch_width: channel width
+ * @sec_ch: secondary channel
+ *
+ * Return: true or false
+ */
+bool vos_is_channel_support_sub20(uint16_t operation_channel,
+				  enum phy_ch_width channel_width,
+				  uint16_t secondary_channel)
+{
+	eNVChannelEnabledType channel_state;
+
+	if (VOS_IS_CHANNEL_5GHZ(operation_channel)) {
+		const struct bonded_chan *bonded_chan_ptr;
+
+		channel_state =
+		    vos_search_5g_bonded_channel(operation_channel,
+						 channel_width,
+						 &bonded_chan_ptr);
+		if (NV_CHANNEL_DISABLE == channel_state)
+			return false;
+
+		channel_state =
+		    vos_get_5g_bonded_channel_state(operation_channel,
+						    channel_width,
+						    bonded_chan_ptr);
+		if (NV_CHANNEL_DISABLE == channel_state)
+			return false;
+
+	} else if (VOS_IS_CHANNEL_24GHZ(operation_channel)) {
+		channel_state =
+		    vos_get_2g_bonded_channel_state(operation_channel,
+						    channel_width,
+						    secondary_channel);
+		if (NV_CHANNEL_DISABLE == channel_state)
+			return false;
+	}
+
+	return true;
+}
+
+/**
+ * vos_phy_channel_width_to_sub20: convert phy channel width
+ * to sub20 channel width
+ * @channel_width:  phy channel width
+ * Return: sub20 channel width
+ */
+uint8_t vos_phy_channel_width_to_sub20(enum phy_ch_width channel_width)
+{
+	if (channel_width == CH_WIDTH_5MHZ)
+		return SUB20_MODE_5MHZ;
+	else if (channel_width == CH_WIDTH_10MHZ)
+		return SUB20_MODE_10MHZ;
+	else
+		return SUB20_MODE_NONE;
+}
+
 /**
  * vos_update_band: Update the band
  * @eBand: Band value
@@ -2142,6 +2258,16 @@ int __wlan_hdd_linux_reg_notifier(struct wiphy *wiphy,
 #endif
     }
 
+    if (pHddCtx->isWiphySuspended == TRUE) {
+        VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+                  "system/cfg80211 is already suspend");
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)) || defined(WITH_BACKPORTS)
+        return;
+#else
+        return 0;
+#endif
+    }
+
     sme_GetFreqBand(pHddCtx->hHal, &nBandCapability);
 
     /* first check if this callback is in response to the driver callback */
@@ -2242,9 +2368,6 @@ int __wlan_hdd_linux_reg_notifier(struct wiphy *wiphy,
         if (pHddCtx->isVHT80Allowed != isVHT80Allowed)
             hdd_checkandupdate_phymode( pHddCtx);
 
-        if (NL80211_REGDOM_SET_BY_DRIVER == request->initiator)
-            complete(&pHddCtx->reg_init);
-
         /* now pass the new country information to sme */
         if (request->alpha2[0] == '0' && request->alpha2[1] == '0')
         {
@@ -2264,6 +2387,10 @@ int __wlan_hdd_linux_reg_notifier(struct wiphy *wiphy,
         vos_nv_set_dfs_region(request->dfs_region);
 
         regdmn_set_dfs_region(&pHddCtx->reg);
+
+        if ((NL80211_REGDOM_SET_BY_DRIVER == request->initiator) ||
+            (NL80211_REGDOM_SET_BY_USER == request->initiator))
+            complete(&pHddCtx->reg_init);
 
     default:
         break;

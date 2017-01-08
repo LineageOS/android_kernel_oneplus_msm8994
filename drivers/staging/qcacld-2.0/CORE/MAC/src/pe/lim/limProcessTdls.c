@@ -2412,19 +2412,21 @@ static void limTdlsUpdateHashNodeInfo(tpAniSirGlobal pMac, tDphHashNode *pStaDs,
         pStaDs->vhtSupportedChannelWidthSet = WNI_CFG_VHT_CHANNEL_WIDTH_20_40MHZ;
     }
 #endif
-    /*Calculate the Secondary Coannel Offset */
-    cbMode = limSelectCBMode(pStaDs, psessionEntry,
-                             psessionEntry->currentOperChannel,
-                             pStaDs->vhtSupportedChannelWidthSet);
+    /*
+     * Calculate the Secondary Channel Offset if our own channel bonding
+     * state is enabled
+     */
+    if (psessionEntry->htSupportedChannelWidthSet) {
+        cbMode = limSelectCBMode(pStaDs, psessionEntry,
+                                 psessionEntry->currentOperChannel,
+                                 pStaDs->vhtSupportedChannelWidthSet);
 
-    pStaDs->htSecondaryChannelOffset = cbMode;
-
+        pStaDs->htSecondaryChannelOffset = cbMode;
 #ifdef WLAN_FEATURE_11AC
-    if ( pStaDs->mlmStaContext.vhtCapability )
-    {
-        pStaDs->htSecondaryChannelOffset = limGetHTCBState(cbMode);
-    }
+        if ( pStaDs->mlmStaContext.vhtCapability )
+            pStaDs->htSecondaryChannelOffset = limGetHTCBState(cbMode);
 #endif
+    }
 
     pSessStaDs = dphLookupHashEntry(pMac, psessionEntry->bssId, &aid,
                                           &psessionEntry->dph.dphHashTable) ;
@@ -2815,8 +2817,7 @@ void PopulateDot11fTdlsExtCapability(tpAniSirGlobal pMac,
     p_ext_cap->TDLSProhibited = TDLS_PROHIBITED ;
 
     extCapability->present = 1 ;
-    /* For STA cases we alwasy support 11mc - Allow MAX length */
-    extCapability->num_bytes = DOT11F_IE_EXTCAP_MAX_LEN;
+    extCapability->num_bytes = lim_compute_ext_cap_ie_length(extCapability);
 
     return ;
 }
@@ -2969,10 +2970,14 @@ void limSendSmeTdlsLinkEstablishReqRsp(tpAniSirGlobal pMac,
         limLog(pMac, LOGE, FL("Failed to allocate memory"));
         return ;
     }
+
+    vos_mem_zero(pTdlsLinkEstablishReqRsp, sizeof(*pTdlsLinkEstablishReqRsp));
+
     pTdlsLinkEstablishReqRsp->statusCode = status ;
-    if ( peerMac )
+    if (pStaDs && peerMac)
     {
         vos_mem_copy(pTdlsLinkEstablishReqRsp->peerMac, peerMac, sizeof(tSirMacAddr));
+        pTdlsLinkEstablishReqRsp->sta_idx = pStaDs->staIndex;
     }
     pTdlsLinkEstablishReqRsp->sessionId = sessionId;
     mmhMsg.type = eWNI_SME_TDLS_LINK_ESTABLISH_RSP ;

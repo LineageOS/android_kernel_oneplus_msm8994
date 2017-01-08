@@ -38,8 +38,7 @@
  */
 
 #include "palTypes.h"
-#include "wniCfgSta.h"
-
+#include "wni_cfg.h"
 #include "cfgApi.h"
 #include "pmmApi.h"
 #include "limApi.h"
@@ -529,8 +528,9 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
                 skip_opmode_update = true;
 
              if (!skip_opmode_update &&
-                 (operMode != pBeacon->OperatingMode.chanWidth))
-             {
+                 ((operMode != pBeacon->OperatingMode.chanWidth) ||
+                 (pStaDs->vhtSupportedRxNss !=
+                  (pBeacon->OperatingMode.rxNSS + 1)))) {
                 uint32_t fw_vht_ch_wd = wma_get_vht_ch_width();
                 PELOG1(schLog(pMac, LOG1,
                          FL(" received OpMode Chanwidth %d, staIdx = %d"),

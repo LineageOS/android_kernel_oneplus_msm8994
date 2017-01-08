@@ -1515,14 +1515,10 @@ static int hifDeviceInserted(struct sdio_func *func, const struct sdio_device_id
     AR_DEBUG_PRINTF(ATH_DEBUG_TRACE,
             ("AR6000: hifDeviceInserted, Function: 0x%X, Vendor ID: 0x%X, Device ID: 0x%X, block size: 0x%X/0x%X\n",
              func->num, func->vendor, id->device, func->max_blksize, func->cur_blksize));
-    /*
-    dma_mask should not be NULL, otherwise dma_map_single will crash.
-    TODO: check why dma_mask is NULL here
-    */
-    if (func->dev.dma_mask == NULL){
-        static u64 dma_mask = 0xFFFFFFFF;
-        func->dev.dma_mask = &dma_mask;
-    }
+
+    /* dma_mask should be populated here. Use the parent device's setting. */
+    func->dev.dma_mask = mmc_dev(func->card->host)->dma_mask;
+
     for (i=0; i<MAX_HIF_DEVICES; ++i) {
         HIF_DEVICE *hifdevice = hif_devices[i];
         if (hifdevice && hifdevice->powerConfig == HIF_DEVICE_POWER_CUT &&
@@ -2588,9 +2584,59 @@ static void hif_flush_async_task(HIF_DEVICE *device)
     }
 }
 
+/**
+ * hif_reset_target() - Reset target device
+ * @hif_device: pointer to hif_device structure
+ *
+ * Reset the target by invoking power off and power on
+ * sequence to bring back target into active state.
+ * This API shall be called only when driver load/unload
+ * is in progress.
+ *
+ * Return: 0 on success, error for failure case.
+ */
+static int hif_reset_target(HIF_DEVICE *hif_device)
+{
+	int ret;
+
+	if (!hif_device || !hif_device->func|| !hif_device->func->card) {
+		AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
+			("AR6000: %s invalid HIF DEVICE \n", __func__));
+		return -ENODEV;
+	}
+	/* Disable sdio func->pull down WLAN_EN-->pull down DAT_2 line */
+	ret = mmc_power_save_host(hif_device->func->card->host);
+	if(ret) {
+		AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
+			("AR6000: %s Failed to save mmc Power host %d\n",
+			__func__, ret));
+		goto done;
+	}
+
+	/* pull up DAT_2 line->pull up WLAN_EN-->Enable sdio func */
+	ret = mmc_power_restore_host(hif_device->func->card->host);
+	if(ret) {
+		AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
+			("AR6000: %s Failed to restore mmc Power host %d\n",
+			__func__, ret));
+	}
+
+done:
+	return ret;
+}
+
 void HIFDetachHTC(HIF_DEVICE *device)
 {
     hif_flush_async_task(device);
+    if (device->ctrl_response_timeout) {
+        /* Reset the target by invoking power off and power on sequence to
+         * the card to bring back into active state.
+         */
+        if(hif_reset_target(device))
+            VOS_BUG(0);
+        device->ctrl_response_timeout = false;
+    }
+
     A_MEMZERO(&device->htcCallbacks,sizeof(device->htcCallbacks));
 }
 
@@ -2766,42 +2812,23 @@ static int hif_sdio_device_resume(struct device *dev)
 #endif
 
 /**
- * hif_reset_target() - Reset target device
+ * hif_set_target_reset() - Reset target device
  * @hif_device: pointer to hif_device structure
  *
- * Reset the target by invoking power off and power on
- * sequence to bring back target into active state.
+ * Set the target reset flag.
  * This API shall be called only when driver load/unload
  * is in progress.
  *
  * Return: 0 on success, error for failure case.
  */
-int hif_reset_target(HIF_DEVICE *hif_device)
+int hif_set_target_reset(HIF_DEVICE *hif_device)
 {
-	int ret;
-
 	if (!hif_device || !hif_device->func|| !hif_device->func->card) {
 		AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
 			("AR6000: %s invalid HIF DEVICE \n", __func__));
 		return -ENODEV;
 	}
-	/* Disable sdio func->pull down WLAN_EN-->pull down DAT_2 line */
-	ret = mmc_power_save_host(hif_device->func->card->host);
-	if(ret) {
-		AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
-			("AR6000: %s Failed to save mmc Power host %d\n",
-			__func__, ret));
-		goto done;
-	}
+	hif_device->ctrl_response_timeout = true;
 
-	/* pull up DAT_2 line->pull up WLAN_EN-->Enable sdio func */
-	ret = mmc_power_restore_host(hif_device->func->card->host);
-	if(ret) {
-		AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
-			("AR6000: %s Failed to restore mmc Power host %d\n",
-			__func__, ret));
-	}
-
-done:
-	return ret;
+	return 0;
 }

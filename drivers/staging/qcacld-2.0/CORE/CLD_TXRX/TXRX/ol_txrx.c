@@ -538,6 +538,8 @@ ol_txrx_pdev_attach(
         pdev->htt_pkt_type = htt_pkt_type_native_wifi;
     } else if (pdev->frame_format == wlan_frm_fmt_802_3) {
         pdev->htt_pkt_type = htt_pkt_type_ethernet;
+    } else if (pdev->frame_format == wlan_frm_fmt_raw) {
+        pdev->htt_pkt_type = htt_pkt_type_raw;
     } else {
         VOS_TRACE(VOS_MODULE_ID_TXRX, VOS_TRACE_LEVEL_ERROR,
             "%s Invalid standard frame type: %d\n",
@@ -632,7 +634,9 @@ ol_txrx_pdev_attach(
             pdev->rx_opt_proc = ol_rx_fwd_check;
         }
     } else {
-        if (ol_cfg_rx_pn_check(pdev->ctrl_pdev)) {
+        if (VOS_MONITOR_MODE == vos_get_conparam()) {
+            pdev->rx_opt_proc = ol_rx_deliver;
+        } else if (ol_cfg_rx_pn_check(pdev->ctrl_pdev)) {
             if (ol_cfg_rx_fwd_disabled(pdev->ctrl_pdev)) {
                 /*
                  * PN check done on host, rx->tx forwarding not done at all.
@@ -1197,6 +1201,8 @@ ol_txrx_vdev_detach(
     void *context)
 {
     struct ol_txrx_pdev_t *pdev = vdev->pdev;
+    int i;
+    struct ol_tx_desc_t *tx_desc;
 
     /* preconditions */
     TXRX_ASSERT2(vdev);
@@ -1222,7 +1228,7 @@ ol_txrx_vdev_detach(
         adf_nbuf_set_next(vdev->ll_pause.txq.head, NULL);
         adf_nbuf_unmap(pdev->osdev, vdev->ll_pause.txq.head,
                        ADF_OS_DMA_TO_DEVICE);
-        adf_nbuf_tx_free(vdev->ll_pause.txq.head, 1 /* error */);
+        adf_nbuf_tx_free(vdev->ll_pause.txq.head, ADF_NBUF_PKT_ERROR);
         vdev->ll_pause.txq.head = next;
     }
     adf_os_spin_unlock_bh(&vdev->ll_pause.mutex);
@@ -1262,6 +1268,24 @@ ol_txrx_vdev_detach(
         vdev->mac_addr.raw[3], vdev->mac_addr.raw[4], vdev->mac_addr.raw[5]);
 
     htt_vdev_detach(pdev->htt_pdev, vdev->vdev_id);
+
+    /*
+    * The ol_tx_desc_free might access the invalid content of vdev referred
+    * by tx desc, since this vdev might be detached in another thread
+    * asynchronous.
+    *
+    * Go through tx desc pool to set corresponding tx desc's vdev to NULL
+    * when detach this vdev, and add vdev checking in the ol_tx_desc_free
+    * to avoid crash.
+    *
+    */
+    adf_os_spin_lock_bh(&pdev->tx_mutex);
+    for (i = 0; i < pdev->tx_desc.pool_size; i++) {
+        tx_desc = ol_tx_desc_find(pdev, i);
+        if (tx_desc->vdev == vdev)
+            tx_desc->vdev = NULL;
+    }
+    adf_os_spin_unlock_bh(&pdev->tx_mutex);
 
     /*
      * Doesn't matter if there are outstanding tx frames -
@@ -1743,12 +1767,31 @@ ol_txrx_peer_unref_delete(ol_txrx_peer_handle peer)
             if (vdev->delete.pending == 1) {
                 ol_txrx_vdev_delete_cb vdev_delete_cb = vdev->delete.callback;
                 void *vdev_delete_context = vdev->delete.context;
+                struct ol_tx_desc_t *tx_desc;
 
                 /*
                  * Now that there are no references to the peer, we can
                  * release the peer reference lock.
                  */
                 adf_os_spin_unlock_bh(&pdev->peer_ref_mutex);
+
+                /*
+                * The ol_tx_desc_free might access the invalid content of vdev
+                * referred by tx desc, since this vdev might be detached in
+                * another thread asynchronous.
+                *
+                * Go through tx desc pool to set corresponding tx desc's vdev
+                * to NULL when detach this vdev, and add vdev checking in the
+                * ol_tx_desc_free to avoid crash.
+                *
+                */
+                adf_os_spin_lock_bh(&pdev->tx_mutex);
+                for (i = 0; i < pdev->tx_desc.pool_size; i++) {
+                    tx_desc = ol_tx_desc_find(pdev, i);
+                    if (tx_desc->vdev == vdev)
+                        tx_desc->vdev = NULL;
+                }
+                adf_os_spin_unlock_bh(&pdev->tx_mutex);
 
                 TXRX_PRINT(TXRX_PRINT_LEVEL_INFO1,
                     "%s: deleting vdev object %p "
@@ -1799,6 +1842,9 @@ ol_txrx_peer_unref_delete(ol_txrx_peer_handle peer)
         }
 
         adf_os_mem_free(peer);
+        /* set self_peer to null, otherwise may crash when unload driver */
+        if (VOS_MONITOR_MODE == vos_get_conparam())
+            pdev->self_peer = NULL;
     } else {
         adf_os_spin_unlock_bh(&pdev->peer_ref_mutex);
     }
@@ -2710,6 +2756,8 @@ ol_txrx_ipa_uc_op_response(
 {
    if (pdev->ipa_uc_op_cb) {
       pdev->ipa_uc_op_cb(op_msg, pdev->osif_dev);
+   } else {
+      adf_os_mem_free(op_msg);
    }
 }
 

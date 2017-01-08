@@ -41,7 +41,7 @@
 
 #include "palTypes.h"
 #include "sirTypes.h"
-#include "wniCfgSta.h"
+#include "wni_cfg.h"
 
 
 ///Capability information related
@@ -408,11 +408,9 @@
 #define NSS_1x1_MODE 1
 #define NSS_2x2_MODE 2
 
-#ifdef FEATURE_AP_MCC_CH_AVOIDANCE
 #define SIR_MAC_QCOM_VENDOR_EID      200
 #define SIR_MAC_QCOM_VENDOR_OUI      "\x00\xA0\xC6"
 #define SIR_MAC_QCOM_VENDOR_SIZE     3
-#endif /* FEATURE_AP_MCC_CH_AVOIDANCE */
 
 /// Workaround IE to change beacon length when it is 4*n+1
 #define SIR_MAC_ANI_WORKAROUND_EID     255
@@ -457,6 +455,10 @@
 
 #define SIR_MAC_CISCO_OUI "\x00\x40\x96"
 #define SIR_MAC_CISCO_OUI_SIZE 3
+
+/* WFA vendor specific TPC OUI */
+#define SIR_MAC_WFA_TPC_OUI           "\x00\x50\xF2\x08\x00"
+#define SIR_MAC_WFA_TPC_OUI_SIZE      5
 
 // min size of wme oui header: oui(3) + type + subtype + version
 #define SIR_MAC_OUI_WME_HDR_MIN       6

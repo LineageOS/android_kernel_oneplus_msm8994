@@ -124,5 +124,4 @@ typedef void (*tp_ol_packetdump_cb)(adf_nbuf_t netbuf,
 void ol_register_packetdump_callback(tp_ol_packetdump_cb ol_tx_packetdump_cb,
 				tp_ol_packetdump_cb ol_rx_packetdump_cb);
 void ol_deregister_packetdump_callback(void);
-
 #endif /* _OL_TXRX_API__H_ */

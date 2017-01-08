@@ -1163,7 +1163,7 @@ ol_txrx_vdev_flush(ol_txrx_vdev_handle vdev)
             adf_nbuf_set_next(vdev->ll_pause.txq.head, NULL);
             adf_nbuf_unmap(vdev->pdev->osdev, vdev->ll_pause.txq.head,
                            ADF_OS_DMA_TO_DEVICE);
-            adf_nbuf_tx_free(vdev->ll_pause.txq.head, 1 /* error */);
+            adf_nbuf_tx_free(vdev->ll_pause.txq.head, ADF_NBUF_PKT_ERROR);
             vdev->ll_pause.txq.head = next;
         }
         vdev->ll_pause.txq.tail = NULL;
@@ -1209,7 +1209,7 @@ void ol_tx_pdev_throttle_phase_timer(void *context)
             if (pdev->tx_throttle.current_throttle_level !=
                 THROTTLE_LEVEL_0) {
                 TXRX_PRINT(TXRX_PRINT_LEVEL_WARN, "start timer %d ms\n", ms);
-                adf_os_timer_start(&pdev->tx_throttle.phase_timer, ms);
+                adf_os_timer_mod(&pdev->tx_throttle.phase_timer, ms);
             }
         }
     }
@@ -1229,7 +1229,7 @@ void ol_tx_pdev_throttle_phase_timer(void *context)
         ms = pdev->tx_throttle.throttle_time_ms[cur_level][cur_phase];
         if (pdev->tx_throttle.current_throttle_level != THROTTLE_LEVEL_0) {
             TXRX_PRINT(TXRX_PRINT_LEVEL_WARN, "start timer %d ms\n", ms);
-            adf_os_timer_start(&pdev->tx_throttle.phase_timer, ms);
+            adf_os_timer_mod(&pdev->tx_throttle.phase_timer, ms);
         }
     }
 }
@@ -1268,7 +1268,7 @@ void ol_tx_throttle_set_level(struct ol_txrx_pdev_t *pdev, int level)
             ms = pdev->tx_throttle.throttle_time_ms[level][THROTTLE_PHASE_OFF];
             /* pause all */
             ol_txrx_throttle_pause(pdev);
-            adf_os_timer_start(&pdev->tx_throttle.phase_timer, ms);
+            adf_os_timer_mod(&pdev->tx_throttle.phase_timer, ms);
         } else {
             pdev->tx_throttle.current_throttle_phase = THROTTLE_PHASE_ON;
             ms = pdev->tx_throttle.throttle_time_ms[level][THROTTLE_PHASE_ON];
@@ -1283,7 +1283,7 @@ void ol_tx_throttle_set_level(struct ol_txrx_pdev_t *pdev, int level)
         ms = pdev->tx_throttle.throttle_time_ms[level][THROTTLE_PHASE_OFF];
 
         adf_os_timer_cancel(&pdev->tx_throttle.phase_timer);
-        adf_os_timer_start(&pdev->tx_throttle.phase_timer, ms);
+        adf_os_timer_mod(&pdev->tx_throttle.phase_timer, ms);
     }
 }
 
@@ -1379,7 +1379,7 @@ ol_tx_queue_log_entry_type_info(
             struct ol_tx_log_queue_state_var_sz_t *record;
 
             align_pad =
-                (*align - ((((u_int32_t) type) + 1))) & (*align - 1);
+               (*align - (uint32_t)(((unsigned long) type) + 1)) & (*align - 1);
             record = (struct ol_tx_log_queue_state_var_sz_t *)
                 (type + 1 + align_pad);
             *size += record->num_cats_active *

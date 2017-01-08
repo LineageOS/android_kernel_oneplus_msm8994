@@ -423,8 +423,6 @@ VOS_STATUS vos_open( v_CONTEXT_t *pVosContext, v_SIZE_t hddContextSize )
    /* Initialize the timer module */
    vos_timer_module_init();
 
-   vos_wdthread_init_timer_work(vos_process_wd_timer);
-
    /* Initialize bug reporting structure */
    vos_init_log_completion();
 
@@ -2101,7 +2099,6 @@ vos_fetch_tl_cfg_parms
 VOS_STATUS vos_shutdown(v_CONTEXT_t vosContext)
 {
   VOS_STATUS vosStatus;
-  tpAniSirGlobal pMac = (((pVosContextType)vosContext)->pMACContext);
 
   vosStatus = WLANTL_Close(vosContext);
   if (!VOS_IS_STATUS_SUCCESS(vosStatus))
@@ -2117,16 +2114,6 @@ VOS_STATUS vos_shutdown(v_CONTEXT_t vosContext)
      VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
          "%s: Failed to close SME", __func__);
      VOS_ASSERT( VOS_IS_STATUS_SUCCESS( vosStatus ) );
-  }
-
-  /* CAC timer will be initiated and started only when SAP starts on
-  * DFS channel and it will be stopped and destroyed immediately once the
-  * radar detected or timedout. So as per design CAC timer should be
-  * destroyed after stop.*/
-  if (pMac->sap.SapDfsInfo.is_dfs_cac_timer_running) {
-     vos_timer_stop(&pMac->sap.SapDfsInfo.sap_dfs_cac_timer);
-     pMac->sap.SapDfsInfo.is_dfs_cac_timer_running = 0;
-     vos_timer_destroy(&pMac->sap.SapDfsInfo.sap_dfs_cac_timer);
   }
 
   vosStatus = macClose( ((pVosContextType)vosContext)->pMACContext);
@@ -2670,6 +2657,26 @@ uint8_t vos_is_multicast_logging(void)
 }
 
 /*
+ * vos_reset_log_completion() - Reset log param structure
+ *@vos_context: Pointer to global vos context
+ *
+ * This function is used to reset the logging related
+ * parameters to default.
+ *
+ * Return: None
+ */
+void vos_reset_log_completion(VosContextType *vos_context)
+{
+	/* Vos Context is validated by the caller */
+	vos_spin_lock_acquire(&vos_context->bug_report_lock);
+	vos_context->log_complete.indicator = WLAN_LOG_INDICATOR_UNUSED;
+	vos_context->log_complete.is_fatal = WLAN_LOG_TYPE_NON_FATAL;
+	vos_context->log_complete.is_report_in_progress = false;
+	vos_context->log_complete.reason_code = WLAN_LOG_REASON_CODE_UNUSED;
+	vos_spin_lock_release(&vos_context->bug_report_lock);
+}
+
+/*
  * vos_init_log_completion() - Initialize log param structure
  *
  * This function is used to initialize the logging related
@@ -2692,9 +2699,7 @@ void vos_init_log_completion(void)
 	vos_context->log_complete.indicator = WLAN_LOG_INDICATOR_UNUSED;
 	vos_context->log_complete.reason_code = WLAN_LOG_REASON_CODE_UNUSED;
 	vos_context->log_complete.is_report_in_progress = false;
-	/* Attempting to initialize an already initialized lock
-	 * results in a failure. This must be ok here.
-	 */
+
 	vos_spin_lock_init(&vos_context->bug_report_lock);
 }
 
@@ -2787,17 +2792,15 @@ void vos_get_log_and_reset_completion(uint32_t *is_fatal,
 	if ((WLAN_LOG_INDICATOR_HOST_DRIVER == *indicator) &&
 	    ((WLAN_LOG_REASON_SME_OUT_OF_CMD_BUF == *reason_code) ||
 		 (WLAN_LOG_REASON_SME_COMMAND_STUCK == *reason_code) ||
-		 (WLAN_LOG_REASON_STALE_SESSION_FOUND == *reason_code)))
+		 (WLAN_LOG_REASON_STALE_SESSION_FOUND == *reason_code) ||
+		 (WLAN_LOG_REASON_SCAN_NOT_ALLOWED == *reason_code)))
 		*is_ssr_needed = true;
 	else
 		*is_ssr_needed = false;
 
-	/* reset */
-	vos_context->log_complete.indicator = WLAN_LOG_INDICATOR_UNUSED;
-	vos_context->log_complete.is_fatal = WLAN_LOG_TYPE_NON_FATAL;
-	vos_context->log_complete.is_report_in_progress = false;
-	vos_context->log_complete.reason_code = WLAN_LOG_REASON_CODE_UNUSED;
 	vos_spin_lock_release(&vos_context->bug_report_lock);
+
+	vos_reset_log_completion(vos_context);
 }
 
 /**
@@ -2964,7 +2967,7 @@ VOS_STATUS vos_flush_logs(uint32_t is_fatal,
 	if (0 != ret) {
 		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
 			"%s: Failed to send flush FW log", __func__);
-		vos_init_log_completion();
+		vos_reset_log_completion(vos_context);
 		return VOS_STATUS_E_FAILURE;
 	}
 
@@ -3084,4 +3087,27 @@ int vos_set_radio_index(int radio_index)
 void vos_svc_fw_shutdown_ind(struct device *dev)
 {
 	hdd_svc_fw_shutdown_ind(dev);
+}
+
+v_U64_t vos_get_monotonic_boottime_ns(void)
+{
+	struct timespec ts;
+
+	ktime_get_ts(&ts);
+	return timespec_to_ns(&ts);
+}
+
+/**
+ * vos_do_div() - wrapper function for kernel macro(do_div).
+ *
+ * @dividend: Dividend value
+ * @divisor : Divisor value
+ *
+ * Return: Quotient
+ */
+uint64_t vos_do_div(uint64_t dividend, uint32_t divisor)
+{
+	do_div(dividend, divisor);
+	/*do_div macro updates dividend with Quotient of dividend/divisor */
+	return dividend;
 }

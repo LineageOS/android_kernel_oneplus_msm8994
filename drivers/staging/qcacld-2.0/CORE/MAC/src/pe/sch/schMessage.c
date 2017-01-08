@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014, 2016 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -37,8 +37,7 @@
  */
 #include "palTypes.h"
 #include "sirCommon.h"
-
-#include "wniCfgSta.h"
+#include "wni_cfg.h"
 #include "aniGlobal.h"
 #include "cfgApi.h"
 #include "limApi.h"
@@ -200,7 +199,6 @@ void schProcessMessage(tpAniSirGlobal pMac,tpSirMsgQ pSchMsg)
                 case WNI_CFG_EDCA_WME_ACVI:
                 case WNI_CFG_EDCA_WME_ACVO:
                     if (LIM_IS_AP_ROLE(psessionEntry)) {
-                        psessionEntry->gLimEdcaParamSetCount++;
                         schQosUpdateBroadcast(pMac, psessionEntry);
                     }
                     break;
@@ -306,10 +304,13 @@ schGetParams(
     return eSIR_SUCCESS;
 }
 
-static void broadcastWMMOfConcurrentSTASession(tpAniSirGlobal pMac, tpPESession psessionEntry)
+static bool
+broadcastWMMOfConcurrentSTASession(tpAniSirGlobal pMac,
+	tpPESession psessionEntry)
 {
     tANI_U8         i,j;
     tpPESession     pConcurrentStaSessionEntry;
+    bool updated = false;
 
     for (i =0;i < pMac->lim.maxBssId;i++)
     {
@@ -321,6 +322,12 @@ static void broadcastWMMOfConcurrentSTASession(tpAniSirGlobal pMac, tpPESession 
            )
         {
             pConcurrentStaSessionEntry = &(pMac->lim.gpSession[i]);
+            if (vos_mem_compare2(psessionEntry->gLimEdcaParamsBC,
+                pConcurrentStaSessionEntry->gLimEdcaParams,
+                sizeof(pConcurrentStaSessionEntry->gLimEdcaParams)))
+                updated = true;
+            else
+                continue;
             for (j=0; j<MAX_NUM_AC; j++)
             {
                 psessionEntry->gLimEdcaParamsBC[j].aci.acm = pConcurrentStaSessionEntry->gLimEdcaParams[j].aci.acm;
@@ -346,6 +353,7 @@ static void broadcastWMMOfConcurrentSTASession(tpAniSirGlobal pMac, tpPESession 
             break;
         }
     }
+    return updated;
 }
 
 void
@@ -355,6 +363,7 @@ schQosUpdateBroadcast(tpAniSirGlobal pMac, tpPESession psessionEntry)
     tANI_U32        cwminidx, cwmaxidx, txopidx;
     tANI_U32        phyMode;
     tANI_U8         i;
+    bool updated = false;
 
     if (schGetParams(pMac, params, false) != eSIR_SUCCESS)
     {
@@ -387,11 +396,36 @@ schQosUpdateBroadcast(tpAniSirGlobal pMac, tpPESession psessionEntry)
 
     for(i=0; i<MAX_NUM_AC; i++)
     {
-        psessionEntry->gLimEdcaParamsBC[i].aci.acm = (tANI_U8) params[i][WNI_CFG_EDCA_PROFILE_ACM_IDX];
-        psessionEntry->gLimEdcaParamsBC[i].aci.aifsn = (tANI_U8) params[i][WNI_CFG_EDCA_PROFILE_AIFSN_IDX];
-        psessionEntry->gLimEdcaParamsBC[i].cw.min =  convertCW(GET_CW(&params[i][cwminidx]));
-        psessionEntry->gLimEdcaParamsBC[i].cw.max =  convertCW(GET_CW(&params[i][cwmaxidx]));
-        psessionEntry->gLimEdcaParamsBC[i].txoplimit=  (tANI_U16) params[i][txopidx];
+        if (psessionEntry->gLimEdcaParamsBC[i].aci.acm !=
+            (tANI_U8) params[i][WNI_CFG_EDCA_PROFILE_ACM_IDX]) {
+            psessionEntry->gLimEdcaParamsBC[i].aci.acm =
+            (tANI_U8) params[i][WNI_CFG_EDCA_PROFILE_ACM_IDX];
+            updated = true;
+        }
+        if (psessionEntry->gLimEdcaParamsBC[i].aci.aifsn !=
+            (tANI_U8) params[i][WNI_CFG_EDCA_PROFILE_AIFSN_IDX]) {
+            psessionEntry->gLimEdcaParamsBC[i].aci.aifsn =
+            (tANI_U8) params[i][WNI_CFG_EDCA_PROFILE_AIFSN_IDX];
+            updated = true;
+        }
+        if (psessionEntry->gLimEdcaParamsBC[i].cw.min !=
+            convertCW(GET_CW(&params[i][cwminidx]))) {
+            psessionEntry->gLimEdcaParamsBC[i].cw.min =
+            convertCW(GET_CW(&params[i][cwminidx]));
+            updated = true;
+        }
+        if (psessionEntry->gLimEdcaParamsBC[i].cw.max !=
+            convertCW(GET_CW(&params[i][cwmaxidx]))) {
+            psessionEntry->gLimEdcaParamsBC[i].cw.max =
+            convertCW(GET_CW(&params[i][cwmaxidx]));
+            updated = true;
+        }
+        if (psessionEntry->gLimEdcaParamsBC[i].txoplimit !=
+            (tANI_U16) params[i][txopidx]) {
+            psessionEntry->gLimEdcaParamsBC[i].txoplimit =
+            (tANI_U16) params[i][txopidx];
+            updated = true;
+        }
 
        PELOG1(schLog(pMac, LOG1, "QoSUpdateBCast: AC :%d: AIFSN: %d, ACM %d, CWmin %d, CWmax %d, TxOp %d", i,
                 psessionEntry->gLimEdcaParamsBC[i].aci.aifsn,
@@ -403,7 +437,12 @@ schQosUpdateBroadcast(tpAniSirGlobal pMac, tpPESession psessionEntry)
     }
 
     /* If there exists a concurrent STA-AP session, use its WMM params to broadcast in beacons. WFA Wifi Direct test plan 6.1.14 requirement */
-    broadcastWMMOfConcurrentSTASession(pMac, psessionEntry);
+    if (broadcastWMMOfConcurrentSTASession(pMac, psessionEntry))
+        updated = true;
+    if (updated)
+        psessionEntry->gLimEdcaParamSetCount++;
+    schLog(pMac, LOG4, FL("gLimEdcaParamSetCount %d updated %d"),
+        psessionEntry->gLimEdcaParamSetCount, updated);
 
     if (schSetFixedBeaconFields(pMac,psessionEntry) != eSIR_SUCCESS)
         PELOGE(schLog(pMac, LOGE, "Unable to set beacon fields!");)
@@ -560,7 +599,6 @@ schEdcaProfileUpdate(tpAniSirGlobal pMac, tpPESession psessionEntry)
 {
     if (LIM_IS_AP_ROLE(psessionEntry) || LIM_IS_IBSS_ROLE(psessionEntry)) {
         schQosUpdateLocal(pMac, psessionEntry);
-        psessionEntry->gLimEdcaParamSetCount++;
         schQosUpdateBroadcast(pMac, psessionEntry);
     }
 }
