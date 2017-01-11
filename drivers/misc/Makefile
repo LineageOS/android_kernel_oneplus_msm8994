@@ -56,7 +56,7 @@ obj-$(CONFIG_INTEL_MEI)		+= mei/
 obj-$(CONFIG_VMWARE_VMCI)	+= vmw_vmci/
 obj-$(CONFIG_LATTICE_ECP3_CONFIG)	+= lattice-ecp3-config.o
 obj-$(CONFIG_SRAM)		+= sram.o
-obj-$(CONFIG_UID_CPUTIME) += uid_cputime.o
+obj-$(CONFIG_UID_SYS_STATS) += uid_sys_stats.o
 obj-$(CONFIG_TSIF) += msm_tsif.o
 obj-$(CONFIG_HAPTIC_ISA1200)		+= isa1200.o
 obj-$(CONFIG_QSEECOM) += qseecom.o
@@ -72,4 +72,3 @@ obj-y				+= qcom/
 #shankai@bsp, 2015/2/2, Add for :drv2605 kernel support 
 obj-$(CONFIG_TI_DRV2605) += ti_drv2605.o
 #endif VENDOR_EDIT
-
