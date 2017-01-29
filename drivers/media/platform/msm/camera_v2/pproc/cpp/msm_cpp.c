@@ -1888,7 +1888,7 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 	struct msm_buf_mngr_info buff_mgr_info, dup_buff_mgr_info;
 	int32_t in_fd;
 	int32_t i = 0, num_output_bufs = 1;
-	int32_t stripe_base = 0;
+	uint32_t stripe_base = 0;
 	uint32_t rd_pntr, wr_0_pntr, wr_1_pntr, wr_2_pntr, wr_3_pntr;
 	uint32_t wr_0_meta_data_wr_pntr, wr_1_meta_data_wr_pntr,
 		wr_2_meta_data_wr_pntr, wr_3_meta_data_wr_pntr;
@@ -1927,6 +1927,13 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 	if (cpp_frame_msg[new_frame->msg_len - 1] !=
 		MSM_CPP_MSG_ID_TRAILER) {
 		pr_err("Invalid frame message\n");
+		return -EINVAL;
+	}
+
+	if (stripe_base == UINT_MAX || new_frame->num_strips >
+		(UINT_MAX - 1 - stripe_base) / stripe_size) {
+		pr_err("Invalid frame message,num_strips %d is large\n",
+			new_frame->num_strips);
 		return -EINVAL;
 	}
 
@@ -2194,9 +2201,12 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 	struct msm_camera_v4l2_ioctl_t *ioctl_ptr)
 {
 	struct msm_cpp_frame_info_t *frame = NULL;
-	struct msm_cpp_frame_info_t *u_frame_info =
-	  (struct msm_cpp_frame_info_t *)ioctl_ptr->ioctl_ptr;
+	struct msm_cpp_frame_info_t k_frame_info;
 	int32_t rc = 0;
+	if (copy_from_user(&k_frame_info,
+			(void __user *)ioctl_ptr->ioctl_ptr,
+			sizeof(k_frame_info)))
+			return -EFAULT;
 
 	frame = msm_cpp_get_frame(ioctl_ptr);
 	if (!frame) {
@@ -2208,7 +2218,7 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 
 	ioctl_ptr->trans_code = rc;
 
-	if (copy_to_user((void __user *)u_frame_info->status, &rc,
+	if (copy_to_user((void __user *)k_frame_info.status, &rc,
 		sizeof(int32_t)))
 		pr_err("error cannot copy error\n");
 
