@@ -12790,8 +12790,6 @@ void wma_vdev_resp_timer(void *data)
 		}
 		WMA_LOGI("%s: bssid %pM vdev_id %d", __func__, params->bssId,
 						tgt_req->vdev_id);
-		wma_send_msg(wma, WDA_ADD_BSS_RSP, (void *)params, 0);
-		goto free_tgt_req;
 error0:
 		if (peer)
 			wma_remove_peer(wma, params->bssId,
@@ -27715,9 +27713,9 @@ VOS_STATUS wma_get_buf_extscan_change_monitor_cmd(tp_wma_handle wma_handle,
 	int numap = psigchange->numAp;
 	tSirAPThresholdParam  *src_ap = psigchange->ap;
 
-	if (!numap) {
-		WMA_LOGE("%s: Invalid number of bssid's",
-			__func__);
+	if ((numap <= 0) || (numap > WLAN_EXTSCAN_MAX_SIGNIFICANT_CHANGE_APS)) {
+		WMA_LOGE("%s: Invalid number of APs: %d",
+			__func__, numap);
 		return VOS_STATUS_E_INVAL;
 	}
 	len += WMI_TLV_HDR_SIZE;
@@ -36459,20 +36457,12 @@ int wma_dfs_indicate_radar(struct ieee80211com *ic,
 		WMA_LOGE("%s:DFS- Invalid WMA handle", __func__);
 		return -ENOENT;
 	}
-	radar_event = (struct wma_dfs_radar_indication *)
-		vos_mem_malloc(sizeof(struct wma_dfs_radar_indication));
-	if (radar_event == NULL)
-	{
-		WMA_LOGE("%s:DFS- Invalid radar_event", __func__);
-		return -ENOENT;
-	}
 
 	/*
 	 * Do not post multiple Radar events on the same channel.
 	 * But, when DFS test mode is enabled, allow multiple dfs
 	 * radar events to be posted on the same channel.
 	 */
-
 	adf_os_spin_lock_bh(&ic->chan_lock);
 	if (!pmac->sap.SapDfsInfo.disable_dfs_ch_switch)
 		wma->dfs_ic->disable_phy_err_processing = true;
@@ -36480,6 +36470,13 @@ int wma_dfs_indicate_radar(struct ieee80211com *ic,
 	if ((ichan->ic_ieee  != (wma->dfs_ic->last_radar_found_chan)) ||
 	    ( pmac->sap.SapDfsInfo.disable_dfs_ch_switch == VOS_TRUE) )
 	{
+		radar_event = (struct wma_dfs_radar_indication *)
+			vos_mem_malloc(sizeof(*radar_event));
+		if (radar_event == NULL) {
+			WMA_LOGE(FL("Failed to allocate memory for radar_event"));
+			return -ENOMEM;
+		}
+
 		/* Indicate the radar event to HDD to stop the netif Tx queues*/
 		hdd_radar_event.ieee_chan_number = ichan->ic_ieee;
 		hdd_radar_event.chan_freq = ichan->ic_freq;
