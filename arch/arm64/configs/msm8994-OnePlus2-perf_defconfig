@@ -648,3 +648,10 @@ CONFIG_SET_PMI8994_RESET_TYPE=y
 #end add by yangrujin end.
 
 CONFIG_UID_CPUTIME=y
+#endif /* VENDOR_EDIT */
+
+#ifdef VENDOR_EDIT add get qsee log
+CONFIG_MSM_TZ_LOG=y
+#endif
+
+CONFIG_INPUT_KEYCHORD=y

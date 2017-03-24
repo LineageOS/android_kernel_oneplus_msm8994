@@ -716,3 +716,6 @@ CONFIG_SET_PMI8994_RESET_TYPE=y
 #end add by yangrujin end.
 
 CONFIG_UID_CPUTIME=y
+#endif /* VENDOR_EDIT */
+
+CONFIG_INPUT_KEYCHORD=y
