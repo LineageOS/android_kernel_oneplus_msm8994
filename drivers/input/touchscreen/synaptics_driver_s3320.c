@@ -1091,7 +1091,7 @@ static void set_gesture(const char __user *buf, int gesture)
 	if (ret == 1)
 		enabled_gestures |= 1 << (gesture - 1);
 	else if (ret == 0)
-		enabled_gestures ^= 1 << (gesture - 1);
+		enabled_gestures &= ~(1 << (gesture - 1));
 
 	ts->double_enable = enabled_gestures == 0 ? 0 : 1;
 	syna_use_gesture = ts->double_enable;
