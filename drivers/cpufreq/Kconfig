@@ -227,6 +227,12 @@ config CPU_BOOST
 
 	  If in doubt, say N.
 
+config CPU_INPUT_BOOST
+	bool "CPU Input Boost"
+	help
+	  Boosts the CPU on touchscreen and touchpad input. Boost frequencies and
+	  duration are configured via sysfs (/sys/kernel/cpu_input_boost/*).
+
 config GENERIC_CPUFREQ_CPU0
 	tristate "Generic CPU0 cpufreq driver"
 	depends on HAVE_CLK && REGULATOR && PM_OPP && OF
