@@ -629,11 +629,6 @@ config MSM_PERFORMANCE
 	  It ensures that no more than a user specified number of CPUs stay
 	  online at any given point in time.
 
-config ONEPLUS_HCUBE
-	tristate "Core control module by OnePlus"
-	help
-	  Add support for OnePlus modified Qualcomm core control module
-
 config QCOM_NPA_DUMP
 	bool "Read NPA dump from the RPM memory"
 	depends on DEBUG_FS
