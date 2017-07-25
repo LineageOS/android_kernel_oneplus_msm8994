@@ -356,7 +356,6 @@
 			label = "modem_mem";
 		};
 
-/* #ifdef VENDOR_EDIT // add by xcb for ramoops 2015-03-31 */
 		ramoops_mem: ramoops_region@0 {
 			linux,reserve-contiguous-region;
 			oem,reserve-region;//modify by jiachenghui for ramoops reserve region
@@ -364,7 +363,6 @@
 			reg = <0 0xac000000 0 0x00100000>;//modify from 0x05800000 to 0xac000000 by jiachenghui for ramoops reserve region
 			label = "ramoops_mem";
 		};
-/* #endif VENDOR_EDIT */
 
 		param_mem: param_region@0 {
 			linux,reserve-contiguous-region;
@@ -1997,13 +1995,11 @@
 		linux,contiguous-region = <&peripheral_mem>;
 	};
 
-/* #ifdef VENDOR_EDIT // add by xcb for ramoops 2015-03-31 */
 	ramoops {
 		compatible = "ramoops";
 		/*reg = <0x05800000 0x00100000>;*/
 		linux,contiguous-region = <&ramoops_mem>;
 	};
-/* #endif VENDOR_EDIT */
 
 
 	clock_rpm: qcom,rpmcc@fc401880 {
