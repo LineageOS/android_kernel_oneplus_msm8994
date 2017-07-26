@@ -43,14 +43,6 @@
 #define SCM_EDLOAD_MODE			0X01
 #define SCM_DLOAD_CMD			0x10
 
-#ifdef VENDOR_EDIT
-/*Define a global pointer which points to the boot shared imem cookie structure */
-struct boot_shared_imem_cookie_type *boot_shared_imem_cookie_ptr;
-extern phys_addr_t ram_console_address_start;
-extern ssize_t ram_console_address_size;
-#endif /* VENDOR_EDIT */
-
-
 static int restart_mode;
 void *restart_reason;
 static bool scm_pmic_arbiter_disable_supported;
@@ -120,13 +112,6 @@ static void set_dload_mode(int on)
 	int ret;
 
 	if (dload_mode_addr) {
-#ifdef VENDOR_EDIT
-		boot_shared_imem_cookie_ptr = (struct boot_shared_imem_cookie_type *) dload_mode_addr;
-		__raw_writel(on ? ram_console_address_start : 0, &(boot_shared_imem_cookie_ptr->kmsg_address_start));
-		__raw_writel(on ? ram_console_address_size : 0, &(boot_shared_imem_cookie_ptr->kmsg_address_size));
-		__raw_writel(on ? virt_to_phys(linux_banner) : 0, &(boot_shared_imem_cookie_ptr->kernel_version));
-		__raw_writel(on ? strlen(linux_banner) : 0, &(boot_shared_imem_cookie_ptr->kernel_version_len));
-#endif /* VENDOR_EDIT */
 		__raw_writel(on ? 0xE47B337D : 0, dload_mode_addr);
 		__raw_writel(on ? 0xCE14091A : 0,
 		       dload_mode_addr + sizeof(unsigned int));
