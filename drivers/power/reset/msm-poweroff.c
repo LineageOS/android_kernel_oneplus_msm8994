@@ -267,8 +267,12 @@ static void msm_restart_prepare(const char *cmd)
 			need_warm_reset = true;
 	}
 
-#ifdef CONFIG_MSM_PRESERVE_MEM
-	need_warm_reset = true;
+#ifdef VENDOR_EDIT
+/* add by yangrujin@bsp 2015/10/27, warm reboot for wlan/rf/ftm/kernel/modem/android mode*/
+    if(!need_warm_reset){
+        need_warm_reset = get_dload_mode() ||((cmd != NULL && cmd[0] != '\0') && strcmp(cmd, "recovery") &&
+            strcmp(cmd, "bootloader") && strcmp(cmd, "rtc"));
+    }
 #endif
 
 	/* Hard reset the PMIC unless memory contents must be maintained. */
