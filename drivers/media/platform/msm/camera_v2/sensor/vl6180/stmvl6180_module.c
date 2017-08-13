@@ -126,7 +126,7 @@ static void stmvl6180_read_calibration_file(void)
 #else
 
 	struct file *f;
-	char buf[8];
+	char buf[8]={0};
 	mm_segment_t fs;
 	int i,is_sign=0;
 #ifdef CALIBRATION_FILE

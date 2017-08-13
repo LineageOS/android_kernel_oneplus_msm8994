@@ -45,11 +45,6 @@ struct msm_eeprom_ctrl_t {
 	struct msm_eeprom_board_info *eboard_info;
 	uint32_t subdev_id;
 	uint32_t read_eeprom;
-//Add by likelong@camera 2015.5.19 to reduce the device bring up time start
-#ifdef VENDOR_EDIT
-	struct work_struct read_work;
-#endif
-//Add by likelong@camera 2015.5.19 to reduce the device bring up time end
 };
 
 #endif
