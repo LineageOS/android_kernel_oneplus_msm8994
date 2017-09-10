@@ -723,7 +723,6 @@ static int32_t msm_cci_i2c_read(struct v4l2_subdev *sd,
 	cci_dev = v4l2_get_subdevdata(sd);
 	master = c_ctrl->cci_info->cci_i2c_master;
 	read_cfg = &c_ctrl->cfg.cci_i2c_read_cfg;
-	
 	if (master >= MASTER_MAX || master < 0) {
 		pr_err("%s:%d Invalid I2C master %d\n",
 			__func__, __LINE__, master);

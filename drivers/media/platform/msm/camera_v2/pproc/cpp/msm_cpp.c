@@ -3295,6 +3295,7 @@ static long msm_cpp_subdev_fops_compat_ioctl(struct file *file,
 				kp_ioctl.len =
 				  sizeof(struct msm_cpp_stream_buff_info_t);
 		}
+		is_copytouser_req = false;
 		if (cmd == VIDIOC_MSM_CPP_ENQUEUE_STREAM_BUFF_INFO32)
 			cmd = VIDIOC_MSM_CPP_ENQUEUE_STREAM_BUFF_INFO;
 		else if (cmd == VIDIOC_MSM_CPP_DELETE_STREAM_BUFF32)
