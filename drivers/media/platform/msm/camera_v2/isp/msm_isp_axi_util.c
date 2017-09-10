@@ -323,10 +323,11 @@ void msm_isp_axi_free_wm(struct msm_vfe_axi_shared_data *axi_data,
 		axi_data->free_wm[stream_info->wm[i]] = 0;
 		axi_data->num_used_wm--;
 	}
-	if (stream_info->stream_src <= IDEAL_RAW)
+	if (stream_info->stream_src <= IDEAL_RAW) {
 		axi_data->num_pix_stream++;
-	else if (stream_info->stream_src < VFE_AXI_SRC_MAX)
+	} else if (stream_info->stream_src < VFE_AXI_SRC_MAX) {
 		axi_data->num_rdi_stream++;
+	}
 }
 
 void msm_isp_axi_reserve_comp_mask(
@@ -1010,11 +1011,9 @@ void msm_isp_axi_stream_update(struct vfe_device *vfe_dev,
 		}
 	}
 
-	spin_lock_irqsave(&vfe_dev->shared_data_lock, flags);
-	if (vfe_dev->axi_data.stream_update[frame_src])
+	if (vfe_dev->axi_data.stream_update[frame_src]) {
 		vfe_dev->axi_data.stream_update[frame_src]--;
-
-	spin_unlock_irqrestore(&vfe_dev->shared_data_lock, flags);
+	}
 
 	if (vfe_dev->axi_data.pipeline_update == DISABLE_CAMIF ||
 		(vfe_dev->axi_data.pipeline_update ==
