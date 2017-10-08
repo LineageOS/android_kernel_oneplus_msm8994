@@ -1562,7 +1562,6 @@ static int qpnp_hap_set(struct qpnp_hap *hap, int on)
 					mutex_unlock(&hap->set_lock);
 					return rc;
 				}
-
 				/*
 				 * Start timer to poll Auto Resonance error bit
 				 */
@@ -1624,6 +1623,8 @@ static void qpnp_timed_enable_worker(struct work_struct *work)
 		}
 		hap->state = 0;
 	} else {
+		if (value < 50)
+			value += 29;
 		value = (value > hap->timeout_ms ?
 				 hap->timeout_ms : value);
 		hap->state = 1;
@@ -2303,6 +2304,7 @@ static int qpnp_haptic_probe(struct spmi_device *spmi)
 	mutex_init(&hap->wf_lock);
 	mutex_init(&hap->set_lock);
 	spin_lock_init(&hap->td_lock);
+
 	INIT_WORK(&hap->work, qpnp_hap_worker);
 	init_completion(&hap->completion);
 	INIT_WORK(&hap->td_work, qpnp_timed_enable_worker);
