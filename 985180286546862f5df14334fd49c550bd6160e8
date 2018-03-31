@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "351201c4_4c97e08c",
+        "filename": "sound/core/timer.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 2013,
+      "author": {
+        "id": 16208
+      },
+      "writtenOn": "2018-03-31T00:28:31Z",
+      "side": 1,
+      "message": "spin_lock is unlocked if we go to error path",
+      "revId": "985180286546862f5df14334fd49c550bd6160e8",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": true
+    }
+  ]
+}
