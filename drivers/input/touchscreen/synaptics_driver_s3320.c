@@ -3481,7 +3481,9 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
                 ts->is_suspended = 1;
             }
 		}
-        else if( *blank == FB_BLANK_UNBLANK && (event == FB_EVENT_BLANK )) {
+		else if ((*blank == FB_BLANK_UNBLAN || *blank == FB_BLANK_NORMAL
+			|| *blank == FB_BLANK_VSYNC_SUSPEND || *blank == FB_BLANK_HSYNC_SUSPEND)
+			&& (event == FB_EVENT_BLANK)) {
 				//ret = synaptics_mode_change(0x04);
 				//TPD_DEBUG("%s %d F01_RMI_CTRL00:0x%x = 0x%x\n",__func__,__LINE__,
 				//	F01_RMI_CTRL00,i2c_smbus_read_byte_data(ts_g->client, F01_RMI_CTRL00));
