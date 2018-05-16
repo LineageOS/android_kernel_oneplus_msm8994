@@ -45,9 +45,10 @@ typedef enum {
 } tri_mode_t;
 
 #define MODE_TOTAL_SILENCE 600
-#define MODE_ALARMS_ONLY 601
+#define MODE_ALARMS_ONLY   601
 #define MODE_PRIORITY_ONLY 602
-#define MODE_NONE 603
+#define MODE_NONE          603
+#define MODE_VIBRATION     604
 
 static int current_mode = 0;
 static int keyCode_slider_top = MODE_ALARMS_ONLY;
@@ -319,7 +320,7 @@ static ssize_t keyCode_top_write(struct file *file, const char __user *page, siz
 
 	if (sscanf(buf, "%d", &data) != 1)
 		return t;
-	if (data < 600 || data > 603)
+	if (data < 600 || data > 604)
 		return t;
 
 	keyCode_slider_top = data;
@@ -363,7 +364,7 @@ static ssize_t keyCode_middle_write(struct file *file, const char __user *page, 
 
 	if (sscanf(buf, "%d", &data) != 1)
 		return t;
-	if (data < 600 || data > 603)
+	if (data < 600 || data > 604)
 		return t;
 
 	keyCode_slider_middle = data;
@@ -467,6 +468,7 @@ static int tristate_dev_probe(struct platform_device *pdev)
 	set_bit(MODE_TOTAL_SILENCE, switch_data->input->keybit);
 	set_bit(MODE_ALARMS_ONLY, switch_data->input->keybit);
 	set_bit(MODE_PRIORITY_ONLY, switch_data->input->keybit);
+	set_bit(MODE_VIBRATION, switch_data->input->keybit);
 	set_bit(MODE_NONE, switch_data->input->keybit);
 	input_set_drvdata(switch_data->input, switch_data);
 	error = input_register_device(switch_data->input);
