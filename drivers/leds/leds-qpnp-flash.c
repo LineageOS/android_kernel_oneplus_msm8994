@@ -29,7 +29,6 @@
 /*muyuezhong@camera,2015-07-23,add this for close backlight on the flash high*/
 #ifdef VENDOR_EDIT
 #include <linux/syscalls.h>
-#define FLASH_MAIN_CLOSE_BACKLIGHT
 #endif
 #define FLASH_LED_PERIPHERAL_SUBTYPE(base)			(base + 0x05)
 #define FLASH_SAFETY_TIMER(base)				(base + 0x40)
