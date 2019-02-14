@@ -966,8 +966,8 @@ static ssize_t synaptics_s1302_virtual_key_enable_write(struct file *file, const
 }
 static int synaptics_s1302_virtual_key_enable_show(struct seq_file *seq, void *offset)
 {
-    seq_printf(seq, "s1302 virtual key %s\n",virtual_key_enable?("enabled"):("disabled"));
-    return 0 ;
+	seq_printf(seq, "%d\n", virtual_key_enable ? 1 : 0);
+	return 0 ;
 }
 static int synaptics_s1302_virtual_key_enable_open(struct inode *inode, struct file *file)
 {
