@@ -266,7 +266,7 @@ struct early_log {
 
 /* early logging buffer and current position */
 static struct early_log
-	early_log[CONFIG_DEBUG_KMEMLEAK_EARLY_LOG_SIZE] __initdata;
+	early_log[4000] __initdata;
 static int crt_early_log __initdata;
 
 static void kmemleak_disable(void);
@@ -1715,16 +1715,7 @@ static DECLARE_WORK(cleanup_work, kmemleak_do_cleanup);
  */
 static void kmemleak_disable(void)
 {
-	/* atomically check whether it was already invoked */
-	if (atomic_cmpxchg(&kmemleak_error, 0, 1))
-		return;
 
-	/* stop any memory operation tracing */
-	atomic_set(&kmemleak_enabled, 0);
-
-	/* check whether it is too early for a kernel thread */
-	if (atomic_read(&kmemleak_initialized))
-		schedule_work(&cleanup_work);
 
 	pr_info("Kernel memory leak detector disabled\n");
 }
@@ -1849,17 +1840,6 @@ static int __init kmemleak_late_init(void)
 	struct dentry *dentry;
 
 	atomic_set(&kmemleak_initialized, 1);
-
-	if (atomic_read(&kmemleak_error)) {
-		/*
-		 * Some error occurred and kmemleak was disabled. There is a
-		 * small chance that kmemleak_disable() was called immediately
-		 * after setting kmemleak_initialized and we may end up with
-		 * two clean-up threads but serialized by scan_mutex.
-		 */
-		schedule_work(&cleanup_work);
-		return -ENOMEM;
-	}
 
 	dentry = debugfs_create_file("kmemleak", S_IRUGO, NULL, NULL,
 				     &kmemleak_fops);

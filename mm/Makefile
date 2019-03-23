@@ -20,7 +20,7 @@ obj-y			:= filemap.o mempool.o oom_kill.o fadvise.o \
 			   interval_tree.o $(mmu-y) \
 			   showmem.o vmpressure.o
 
-obj-y += init-mm.o
+obj-y += init-mm.o kmemleak.o
 
 ifdef CONFIG_NO_BOOTMEM
 	obj-y		+= nobootmem.o
@@ -56,7 +56,6 @@ obj-$(CONFIG_MEMCG) += memcontrol.o page_cgroup.o
 obj-$(CONFIG_CGROUP_HUGETLB) += hugetlb_cgroup.o
 obj-$(CONFIG_MEMORY_FAILURE) += memory-failure.o
 obj-$(CONFIG_HWPOISON_INJECT) += hwpoison-inject.o
-obj-$(CONFIG_DEBUG_KMEMLEAK) += kmemleak.o
 obj-$(CONFIG_DEBUG_KMEMLEAK_TEST) += kmemleak-test.o
 obj-$(CONFIG_CLEANCACHE) += cleancache.o
 obj-$(CONFIG_MEMORY_ISOLATION) += page_isolation.o
