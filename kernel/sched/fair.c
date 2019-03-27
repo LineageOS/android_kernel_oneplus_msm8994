@@ -94,7 +94,7 @@ enum thermal_aware_scheduling {
  * SCHED_TA_THERMAL_ONLY - Only enable when under thermal constraint
  * SCHED_TA_ALWAYS_ON - Always enable TA scheduling
  */
-unsigned int __read_mostly sysctl_thermal_aware_scheduling = SCHED_TA_THERMAL_ONLY;
+unsigned int __read_mostly sysctl_thermal_aware_scheduling = SCHED_TA_DISABLE;
 #endif
 
 /*
