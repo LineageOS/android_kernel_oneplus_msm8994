@@ -637,7 +637,12 @@ char *yytext;
 #include "srcpos.h"
 #include "dtc-parser.tab.h"
 
-YYLTYPE yylloc;
+/* The follwowing is the original script; edited as below to avoid make error due to */
+/* multiple declarations of yylloc */
+/* YYLTYPE yylloc; */
+/* Refer to https://lore.kernel.org/stable/20200331192515.GA39354@ubuntu-m2-xlarge-x86/ */
+
+extern YYLTYPE yylloc;
 
 /* CAUTION: this will stop working if we ever use yyless() or yyunput() */
 #define	YY_USER_ACTION \
